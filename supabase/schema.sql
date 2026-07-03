@@ -23,15 +23,19 @@ create table public.customers (
   id uuid primary key default gen_random_uuid(),
   customer_code text unique,
   name text not null,
-  phone text not null unique, -- unique để import xlsx có thể upsert theo phone (ON CONFLICT)
+  phone text unique, -- unique để import xlsx có thể upsert theo phone (ON CONFLICT); nullable vì
+                      -- khách có thể chỉ có Zalo UID (không có SĐT) — xem check constraint dưới
   zalo_uid text,
   import_batch text, -- tên lô import (từ trang import hoặc tên chiến dịch tuỳ biến) để lọc/xoá theo lô
   extra_fields jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint customers_phone_or_uid_check check (phone is not null or zalo_uid is not null)
 );
--- phone đã có unique index tự động từ constraint `unique` ở trên
-create index idx_customers_zalo_uid on public.customers (zalo_uid) where zalo_uid is not null;
+-- phone đã có unique index tự động từ constraint `unique` ở trên (NULL không đụng NULL khác)
+-- zalo_uid cần UNIQUE (không chỉ index thường) để import/chiến dịch có thể upsert theo UID
+-- khi khách không có SĐT.
+create unique index idx_customers_zalo_uid_unique on public.customers (zalo_uid) where zalo_uid is not null;
 create index idx_customers_import_batch on public.customers (import_batch) where import_batch is not null;
 
 create or replace function public.customer_import_batches()
@@ -88,17 +92,31 @@ create table public.campaigns (
   sent_count int not null default 0,
   failed_count int not null default 0,
   source_file_name text,
+  is_hidden boolean not null default false, -- ẩn khỏi danh sách mặc định, không xoá dữ liệu
+  creation_mode text check (creation_mode in ('broadcast','custom')), -- để "Sao chép" prefill lại đúng chế độ
+  customer_batch text, -- chỉ set khi creation_mode='broadcast': lô KH đã chọn lúc tạo (null = tất cả)
+  fixed_template_data jsonb, -- chỉ set khi creation_mode='broadcast': tham số cố định đã điền lúc tạo
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index idx_campaigns_status on public.campaigns (status);
+create index idx_campaigns_is_hidden on public.campaigns (is_hidden);
+
+-- Giá ước tính mỗi tin theo loại template (tag) — Zalo không trả giá theo hợp
+-- đồng qua API, nên đây là số admin tự nhập theo hợp đồng thật của OA.
+create table public.zns_pricing (
+  tag text primary key check (tag in ('TRANSACTION','CUSTOMER_CARE','PROMOTION','OTHER')),
+  price_vnd numeric(12,2) not null default 0,
+  updated_at timestamptz not null default now()
+);
+alter table public.zns_pricing enable row level security;
 
 create table public.campaign_recipients (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid not null references public.campaigns(id) on delete cascade,
   customer_id uuid references public.customers(id) on delete set null,
-  phone text not null,
+  phone text, -- null khi snapshot từ khách hàng chỉ có Zalo UID (không có SĐT)
   zalo_uid text,
   template_data jsonb not null,
   send_mode text not null check (send_mode in ('uid','phone')),

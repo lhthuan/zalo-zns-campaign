@@ -46,7 +46,7 @@ async function handler(request: Request): Promise<Response> {
           templateData: recipient.template_data as Record<string, string>,
         });
         await recordResult(recipient, result.error, result.message, result.data?.message_id, result);
-      } else {
+      } else if (recipient.phone) {
         const result = await sendPhoneTemplate({
           phone: recipient.phone,
           templateId: zaloTemplateId,
@@ -54,6 +54,15 @@ async function handler(request: Request): Promise<Response> {
           trackingId: recipient.tracking_id,
         });
         await recordResult(recipient, result.error, result.message, result.data?.msg_id, result);
+      } else {
+        await supabase
+          .from("campaign_recipients")
+          .update({
+            status: "failed",
+            error_message: "Không có SĐT lẫn Zalo UID để gửi.",
+            sent_at: new Date().toISOString(),
+          })
+          .eq("id", recipient.id);
       }
     } catch (err) {
       await supabase

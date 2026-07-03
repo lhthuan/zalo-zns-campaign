@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -25,9 +25,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
+import { formatVnd } from "@/lib/format";
 
 const NONE = "__none__";
-const ALL_CUSTOMERS = "__all__";
 
 interface ZaloTemplateParam {
   name: string;
@@ -59,10 +60,11 @@ interface ColumnSelectProps {
 }
 
 function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
+  const items = Object.fromEntries([[NONE, "— Chọn cột —"], ...headers.map((h) => [h, h])]);
   return (
     <div className="space-y-1">
       <Label>{label}</Label>
-      <Select value={value} onValueChange={(v) => onChange(v ?? NONE)}>
+      <Select value={value} onValueChange={(v) => onChange(v ?? NONE)} items={items}>
         <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
@@ -79,7 +81,15 @@ function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
   );
 }
 
-function TemplatePreview({ template }: { template: ZaloTemplate }) {
+function TemplatePreview({
+  template,
+  priceVnd,
+  recipientCount,
+}: {
+  template: ZaloTemplate;
+  priceVnd: number | null;
+  recipientCount: number | null;
+}) {
   const params = template.template_data_schema ?? [];
   return (
     <Card>
@@ -89,7 +99,7 @@ function TemplatePreview({ template }: { template: ZaloTemplate }) {
           <Badge>{template.tag ?? "—"}</Badge>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
         {params.length === 0 ? (
           <p className="text-sm text-muted-foreground">Template này không có tham số nào.</p>
         ) : (
@@ -116,28 +126,54 @@ function TemplatePreview({ template }: { template: ZaloTemplate }) {
             </TableBody>
           </Table>
         )}
+        {priceVnd !== null && (
+          <p className="text-sm text-muted-foreground">
+            Đơn giá ước tính: <strong className="text-foreground">{formatVnd(priceVnd)}</strong> / tin
+            {recipientCount != null && recipientCount > 0 && (
+              <>
+                {" "}
+                × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
+                <strong className="text-foreground">{formatVnd(priceVnd * recipientCount)}</strong>
+              </>
+            )}
+            <span className="text-xs"> (nhập/sửa ở trang Cài đặt)</span>
+          </p>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 export default function NewCampaignPage() {
+  return (
+    <Suspense fallback={<p className="text-muted-foreground">Đang tải...</p>}>
+      <NewCampaignForm />
+    </Suspense>
+  );
+}
+
+function NewCampaignForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const copyFromId = searchParams.get("copyFrom");
+
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"broadcast" | "custom">("broadcast");
   const [submitting, setSubmitting] = useState(false);
+  const [pricing, setPricing] = useState<Record<string, number>>({});
 
   // Broadcast mode
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [allCustomerCount, setAllCustomerCount] = useState(0);
-  const [customerBatch, setCustomerBatch] = useState(ALL_CUSTOMERS);
+  const [customerBatch, setCustomerBatch] = useState(ALL_CUSTOMERS_BATCH);
   const [fixedParams, setFixedParams] = useState<Record<string, string>>({});
 
   // Custom mode
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
+  const [rowCount, setRowCount] = useState(0);
   const [phoneColumn, setPhoneColumn] = useState(NONE);
   const [nameColumn, setNameColumn] = useState(NONE);
   const [uidColumn, setUidColumn] = useState(NONE);
@@ -156,10 +192,51 @@ export default function NewCampaignPage() {
       .then((res) => res.json())
       .then((json) => setAllCustomerCount(json.total ?? 0))
       .catch(() => {});
+    fetch("/api/settings/zns-pricing")
+      .then((res) => res.json())
+      .then((json) => {
+        const map: Record<string, number> = {};
+        for (const row of json.data ?? []) map[row.tag] = row.price_vnd;
+        setPricing(map);
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!copyFromId) return;
+    fetch(`/api/campaigns/${copyFromId}`)
+      .then((res) => res.json())
+      .then((json) => {
+        const c = json.data;
+        if (!c) return;
+        setName(`${c.name} (bản sao)`);
+        setTemplateId(c.template_id);
+        if (c.creation_mode === "broadcast") {
+          setMode("broadcast");
+          setCustomerBatch(c.customer_batch ?? ALL_CUSTOMERS_BATCH);
+          setFixedParams(c.fixed_template_data ?? {});
+        } else {
+          setMode("custom");
+          toast.message("Chiến dịch gốc là dạng tuỳ biến — cần tải lại file danh sách người nhận.");
+        }
+      })
+      .catch(() => toast.error("Không tải được chiến dịch để sao chép"));
+  }, [copyFromId]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
+  const priceVnd = selectedTemplate ? pricing[selectedTemplate.tag ?? "OTHER"] ?? pricing.OTHER ?? null : null;
+  const broadcastCount =
+    customerBatch === ALL_CUSTOMERS_BATCH
+      ? allCustomerCount
+      : batches.find((b) => b.import_batch === customerBatch)?.customer_count ?? 0;
+  const recipientCount = mode === "broadcast" ? broadcastCount : rowCount;
+
+  const templateItems = Object.fromEntries(templates.map((t) => [t.id, t.template_name]));
+  const batchItems = {
+    [ALL_CUSTOMERS_BATCH]: `— ${ALL_CUSTOMERS_LABEL} — (${allCustomerCount})`,
+    ...Object.fromEntries(batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])),
+  };
 
   function downloadDataTemplate() {
     if (!selectedTemplate) return;
@@ -179,6 +256,7 @@ export default function NewCampaignPage() {
     const workbook = XLSX.read(buffer, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+    setRowCount(rows.length);
     setHeaders(rows.length > 0 ? Object.keys(rows[0]) : []);
   }
 
@@ -205,9 +283,9 @@ export default function NewCampaignPage() {
         setSubmitting(false);
         return toast.error("Chọn file danh sách người nhận");
       }
-      if (phoneColumn === NONE) {
+      if (phoneColumn === NONE && uidColumn === NONE) {
         setSubmitting(false);
-        return toast.error("Phải chọn cột Số điện thoại");
+        return toast.error("Phải chọn cột Số điện thoại hoặc Zalo UID");
       }
       const missingRequired = params.filter((p) => p.require && !paramMapping[p.name]);
       if (missingRequired.length > 0) {
@@ -218,7 +296,7 @@ export default function NewCampaignPage() {
       formData.append(
         "mapping",
         JSON.stringify({
-          phone: phoneColumn,
+          phone: phoneColumn === NONE ? undefined : phoneColumn,
           name: nameColumn === NONE ? undefined : nameColumn,
           zalo_uid: uidColumn === NONE ? undefined : uidColumn,
           templateParams: paramMapping,
@@ -233,6 +311,9 @@ export default function NewCampaignPage() {
     if (!res.ok) {
       toast.error(json.error ? JSON.stringify(json.error) : "Tạo chiến dịch thất bại");
       return;
+    }
+    if (json.rejectedRows > 0) {
+      toast.warning(`Đã loại ${json.rejectedRows} dòng lỗi (thiếu SĐT/UID hoặc SĐT không hợp lệ)`);
     }
     toast.success("Đã tạo chiến dịch nháp");
     router.push(`/campaigns/${json.id}`);
@@ -253,7 +334,7 @@ export default function NewCampaignPage() {
           </div>
           <div className="space-y-1">
             <Label>Template</Label>
-            <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")}>
+            <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")} items={templateItems}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Chọn template" />
               </SelectTrigger>
@@ -269,7 +350,9 @@ export default function NewCampaignPage() {
         </CardContent>
       </Card>
 
-      {selectedTemplate && <TemplatePreview template={selectedTemplate} />}
+      {selectedTemplate && (
+        <TemplatePreview template={selectedTemplate} priceVnd={priceVnd} recipientCount={recipientCount} />
+      )}
 
       {selectedTemplate && (
         <Card>
@@ -290,13 +373,17 @@ export default function NewCampaignPage() {
                 </p>
                 <div className="space-y-1">
                   <Label>Danh sách khách hàng</Label>
-                  <Select value={customerBatch} onValueChange={(v) => setCustomerBatch(v ?? ALL_CUSTOMERS)}>
+                  <Select
+                    value={customerBatch}
+                    onValueChange={(v) => setCustomerBatch(v ?? ALL_CUSTOMERS_BATCH)}
+                    items={batchItems}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={ALL_CUSTOMERS}>
-                        — Tất cả khách hàng — ({allCustomerCount})
+                      <SelectItem value={ALL_CUSTOMERS_BATCH}>
+                        — {ALL_CUSTOMERS_LABEL} — ({allCustomerCount})
                       </SelectItem>
                       {batches.map((b) => (
                         <SelectItem key={b.import_batch} value={b.import_batch}>
@@ -318,9 +405,15 @@ export default function NewCampaignPage() {
                       <div key={p.name} className="space-y-1">
                         <Label>
                           {p.name} {p.require && <span className="text-destructive">*</span>}
+                          <span className="ml-2 font-normal text-xs text-muted-foreground">
+                            {p.type}
+                            {(p.minLength || p.maxLength) &&
+                              ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`}
+                          </span>
                         </Label>
                         <Input
                           value={fixedParams[p.name] ?? ""}
+                          maxLength={p.maxLength}
                           onChange={(e) =>
                             setFixedParams((m) => ({ ...m, [p.name]: e.target.value }))
                           }
@@ -346,9 +439,9 @@ export default function NewCampaignPage() {
 
                 {headers.length > 0 && (
                   <div className="space-y-3 border-t pt-3">
-                    <p className="text-sm font-medium">Map cột file</p>
+                    <p className="text-sm font-medium">Map cột file ({rowCount} dòng)</p>
                     <ColumnSelect
-                      label="Số điện thoại (bắt buộc)"
+                      label="Số điện thoại"
                       value={phoneColumn}
                       headers={headers}
                       onChange={setPhoneColumn}
@@ -361,9 +454,10 @@ export default function NewCampaignPage() {
                       onChange={setUidColumn}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Người nhận sẽ dùng UID nếu có (từ file này hoặc đã lưu trong hồ sơ khách hàng), ngược
-                      lại dùng số điện thoại. Sau khi gửi, những khách hàng này sẽ được lưu/cập nhật vào
-                      danh sách Khách hàng, gắn theo tên chiến dịch &quot;{name.trim() || "..."}&quot;.
+                      Cần map ít nhất SĐT hoặc Zalo UID. Người nhận sẽ dùng UID nếu có (từ file này hoặc
+                      đã lưu trong hồ sơ khách hàng), ngược lại dùng số điện thoại. Sau khi gửi, những
+                      khách hàng này sẽ được lưu/cập nhật vào danh sách Khách hàng, gắn theo tên chiến
+                      dịch &quot;{name.trim() || "..."}&quot;.
                     </p>
 
                     {params.length > 0 && (
@@ -372,7 +466,11 @@ export default function NewCampaignPage() {
                         {params.map((p) => (
                           <ColumnSelect
                             key={p.name}
-                            label={`${p.name}${p.require ? " *" : ""}`}
+                            label={`${p.name}${p.require ? " *" : ""} — ${p.type}${
+                              p.minLength || p.maxLength
+                                ? ` (${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự)`
+                                : ""
+                            }`}
                             value={paramMapping[p.name] ?? NONE}
                             headers={headers}
                             onChange={(v) =>

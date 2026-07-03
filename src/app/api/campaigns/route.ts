@@ -4,18 +4,19 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { parseSpreadsheet, mapRowsToRecipients, type ColumnMapping } from "@/lib/spreadsheet/import";
+import { isValidVietnamesePhone } from "@/lib/phone";
+import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 
 const mappingSchema = z.object({
   customer_code: z.string().optional(),
   name: z.string().optional(),
-  phone: z.string(),
+  phone: z.string().optional(),
   zalo_uid: z.string().optional(),
   templateParams: z.record(z.string(), z.string()),
 });
 
 const fixedTemplateDataSchema = z.record(z.string(), z.string());
 
-const ALL_CUSTOMERS = "__all__";
 const INSERT_CHUNK_SIZE = 500;
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -25,20 +26,23 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 interface RecipientBase {
-  phone: string;
+  phone: string | null;
   zalo_uid: string | null;
   customer_id: string | null;
   template_data: Record<string, string>;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     await requireUser();
+    const includeHidden = request.nextUrl.searchParams.get("includeHidden") === "true";
     const supabase = createAdminClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from("campaigns")
       .select("*, zalo_templates(template_name)")
       .order("created_at", { ascending: false });
+    if (!includeHidden) query = query.eq("is_hidden", false);
+    const { data, error } = await query;
     if (error) throw error;
     return NextResponse.json({ data });
   } catch (err) {
@@ -75,6 +79,9 @@ export async function POST(request: NextRequest) {
 
     let recipientsBase: RecipientBase[];
     let sourceFileName: string;
+    let customerBatchForRow: string | null = null;
+    let fixedTemplateDataForRow: Record<string, string> | null = null;
+    let rejectedRows = 0;
 
     if (mode === "broadcast") {
       const customerBatchRaw = formData.get("customer_batch");
@@ -84,7 +91,7 @@ export async function POST(request: NextRequest) {
       }
       const fixedTemplateData = fixedTemplateDataSchema.parse(JSON.parse(fixedRaw));
       const batchLabel =
-        typeof customerBatchRaw === "string" && customerBatchRaw !== ALL_CUSTOMERS
+        typeof customerBatchRaw === "string" && customerBatchRaw !== ALL_CUSTOMERS_BATCH
           ? customerBatchRaw
           : null;
 
@@ -103,6 +110,8 @@ export async function POST(request: NextRequest) {
         template_data: fixedTemplateData,
       }));
       sourceFileName = batchLabel ? `Lô: ${batchLabel}` : "Tất cả khách hàng";
+      customerBatchForRow = batchLabel;
+      fixedTemplateDataForRow = fixedTemplateData;
     } else {
       const file = formData.get("file");
       const mappingRaw = formData.get("mapping");
@@ -113,11 +122,17 @@ export async function POST(request: NextRequest) {
 
       const buffer = await file.arrayBuffer();
       const rows = parseSpreadsheet(buffer);
-      const imported = mapRowsToRecipients(rows, mapping).filter((r) => r.phone);
+      const allRows = mapRowsToRecipients(rows, mapping);
+      const imported = allRows.filter((r) => {
+        if (!r.phone && !r.zalo_uid) return false;
+        if (r.phone && !isValidVietnamesePhone(r.phone)) return false;
+        return true;
+      });
+      rejectedRows = allRows.length - imported.length;
 
       if (imported.length === 0) {
         return NextResponse.json(
-          { error: "No valid rows (missing phone) found in file" },
+          { error: "Không có dòng hợp lệ nào (cần SĐT đúng định dạng hoặc Zalo UID)" },
           { status: 400 }
         );
       }
@@ -125,52 +140,93 @@ export async function POST(request: NextRequest) {
       // Upsert every uploaded recipient into the customers table, tagged with this
       // campaign's name so it becomes a reusable list later (per requirement: after
       // sending a custom campaign, keep the customer data referenced by campaign name).
-      // Split into two upsert groups for the same reason as customers/import/route.ts:
-      // PostgREST's ON CONFLICT SET columns come from the whole batch's key union, so
-      // rows without a UID must never share a batch with rows that do have one.
+      // Split by phone presence (different conflict targets) and, within the
+      // phone group, by UID presence — PostgREST's upsert derives its ON CONFLICT
+      // SET columns from the whole batch's key union, so rows without a UID must
+      // never share a batch with rows that do have one.
       interface CustomerUpsertRow {
         name: string;
-        phone: string;
+        phone?: string;
+        zalo_uid?: string;
         import_batch: string;
         customer_code?: string;
-        zalo_uid?: string;
       }
 
-      const withUid: CustomerUpsertRow[] = [];
-      const withoutUid: CustomerUpsertRow[] = [];
+      const withPhoneUid: CustomerUpsertRow[] = [];
+      const withPhoneNoUid: CustomerUpsertRow[] = [];
+      const uidOnly: CustomerUpsertRow[] = [];
       for (const r of imported) {
         const row: CustomerUpsertRow = {
-          name: r.name || r.phone,
-          phone: r.phone,
+          name: r.name || r.phone || r.zalo_uid || "Khách hàng",
           import_batch: name.trim(),
         };
         if (r.customer_code) row.customer_code = r.customer_code;
-        if (r.zalo_uid) {
+        if (r.phone) {
+          row.phone = r.phone;
+          if (r.zalo_uid) {
+            row.zalo_uid = r.zalo_uid;
+            withPhoneUid.push(row);
+          } else {
+            withPhoneNoUid.push(row);
+          }
+        } else if (r.zalo_uid) {
           row.zalo_uid = r.zalo_uid;
-          withUid.push(row);
-        } else {
-          withoutUid.push(row);
+          uidOnly.push(row);
         }
       }
 
       const customerByPhone = new Map<string, { id: string; zalo_uid: string | null }>();
-      for (const group of [withUid, withoutUid]) {
+      const customerByUid = new Map<string, { id: string }>();
+
+      for (const group of [withPhoneUid, withPhoneNoUid]) {
         if (group.length === 0) continue;
         const { data, error } = await supabase
           .from("customers")
           .upsert(group, { onConflict: "phone", ignoreDuplicates: false })
           .select("id, phone, zalo_uid");
         if (error) throw error;
-        for (const c of data ?? []) customerByPhone.set(c.phone, { id: c.id, zalo_uid: c.zalo_uid });
+        for (const c of data ?? []) {
+          if (c.phone) customerByPhone.set(c.phone, { id: c.id, zalo_uid: c.zalo_uid });
+        }
+      }
+
+      // zalo_uid's unique index is partial (where zalo_uid is not null), which
+      // Postgres can't use as a plain ON CONFLICT arbiter through PostgREST —
+      // so phone-less rows are upserted by hand instead.
+      for (const row of uidOnly) {
+        const { data: existing, error: findError } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("zalo_uid", row.zalo_uid as string)
+          .maybeSingle();
+        if (findError) throw findError;
+
+        if (existing) {
+          const { error } = await supabase
+            .from("customers")
+            .update({ name: row.name, customer_code: row.customer_code, import_batch: row.import_batch })
+            .eq("id", existing.id);
+          if (error) throw error;
+          customerByUid.set(row.zalo_uid as string, { id: existing.id });
+        } else {
+          const { data: inserted, error } = await supabase
+            .from("customers")
+            .insert(row)
+            .select("id")
+            .single();
+          if (error) throw error;
+          customerByUid.set(row.zalo_uid as string, { id: inserted.id });
+        }
       }
 
       recipientsBase = imported.map((r) => {
-        const customer = customerByPhone.get(r.phone);
-        const zaloUid = r.zalo_uid || customer?.zalo_uid || null;
+        const byPhone = r.phone ? customerByPhone.get(r.phone) : undefined;
+        const byUid = !r.phone && r.zalo_uid ? customerByUid.get(r.zalo_uid) : undefined;
+        const zaloUid = r.zalo_uid || byPhone?.zalo_uid || null;
         return {
-          phone: r.phone,
+          phone: r.phone ?? null,
           zalo_uid: zaloUid,
-          customer_id: customer?.id ?? null,
+          customer_id: byPhone?.id ?? byUid?.id ?? null,
           template_data: r.template_data,
         };
       });
@@ -184,6 +240,9 @@ export async function POST(request: NextRequest) {
         template_id: templateId,
         total_recipients: recipientsBase.length,
         source_file_name: sourceFileName,
+        creation_mode: mode,
+        customer_batch: customerBatchForRow,
+        fixed_template_data: fixedTemplateDataForRow,
         created_by: user.id,
       })
       .select()
@@ -215,7 +274,7 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json(
-      { id: campaign.id, totalRecipients: recipientsBase.length, byMode },
+      { id: campaign.id, totalRecipients: recipientsBase.length, byMode, rejectedRows },
       { status: 201 }
     );
   } catch (err) {

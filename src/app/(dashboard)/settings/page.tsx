@@ -20,6 +20,14 @@ interface LogEntry {
   level: "info" | "error";
 }
 
+const PRICING_TAGS = ["TRANSACTION", "CUSTOMER_CARE", "PROMOTION", "OTHER"] as const;
+const PRICING_LABEL: Record<(typeof PRICING_TAGS)[number], string> = {
+  TRANSACTION: "Giao dịch (TRANSACTION)",
+  CUSTOMER_CARE: "Chăm sóc KH (CUSTOMER_CARE)",
+  PROMOTION: "Quảng cáo (PROMOTION)",
+  OTHER: "Khác / chưa rõ loại",
+};
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [appId, setAppId] = useState("");
@@ -27,6 +35,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [pricing, setPricing] = useState<Record<string, number>>({});
+  const [savingPricing, setSavingPricing] = useState(false);
 
   function addLog(message: string, level: LogEntry["level"] = "info") {
     setLog((prev) => [{ time: new Date().toLocaleTimeString("vi-VN"), message, level }, ...prev]);
@@ -42,7 +52,33 @@ export default function SettingsPage() {
         }
       })
       .catch(() => toast.error("Không tải được cấu hình"));
+    fetch("/api/settings/zns-pricing")
+      .then((res) => res.json())
+      .then((json) => {
+        const map: Record<string, number> = {};
+        for (const row of json.data ?? []) map[row.tag] = row.price_vnd;
+        setPricing(map);
+      })
+      .catch(() => toast.error("Không tải được cấu hình giá"));
   }, []);
+
+  async function handleSavePricing() {
+    setSavingPricing(true);
+    const res = await fetch("/api/settings/zns-pricing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        PRICING_TAGS.map((tag) => ({ tag, price_vnd: Number(pricing[tag]) || 0 }))
+      ),
+    });
+    const json = await res.json();
+    setSavingPricing(false);
+    if (!res.ok) {
+      toast.error(json.error ? JSON.stringify(json.error) : "Lưu giá thất bại");
+      return;
+    }
+    toast.success("Đã lưu giá ước tính");
+  }
 
   async function handleSave() {
     if (!appId.trim() || !secretKey.trim()) {
@@ -158,6 +194,33 @@ export default function SettingsPage() {
               ))
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>4. Giá ước tính mỗi tin ZNS (theo loại template)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Zalo không trả về giá hợp đồng qua API — nhập đúng đơn giá/tin theo hợp đồng thật của bạn
+            với Zalo/đối tác để app hiện chi phí ước tính khi tạo chiến dịch.
+          </p>
+          {PRICING_TAGS.map((tag) => (
+            <div key={tag} className="flex items-center gap-3">
+              <Label className="w-56 shrink-0">{PRICING_LABEL[tag]}</Label>
+              <Input
+                type="number"
+                min={0}
+                value={pricing[tag] ?? 0}
+                onChange={(e) => setPricing((p) => ({ ...p, [tag]: Number(e.target.value) }))}
+              />
+              <span className="text-sm text-muted-foreground shrink-0">đ / tin</span>
+            </div>
+          ))}
+          <Button onClick={handleSavePricing} disabled={savingPricing}>
+            {savingPricing ? "Đang lưu..." : "Lưu giá"}
+          </Button>
         </CardContent>
       </Card>
     </div>

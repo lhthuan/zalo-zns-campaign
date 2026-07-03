@@ -28,12 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { isValidVietnamesePhone } from "@/lib/phone";
+import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
 
 interface Customer {
   id: string;
   customer_code: string | null;
   name: string;
-  phone: string;
+  phone: string | null;
   zalo_uid: string | null;
 }
 
@@ -44,7 +46,6 @@ interface ImportBatch {
 }
 
 const PAGE_SIZE = 20;
-const ALL_BATCHES = "__all__";
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -52,7 +53,7 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [batches, setBatches] = useState<ImportBatch[]>([]);
-  const [batchFilter, setBatchFilter] = useState(ALL_BATCHES);
+  const [batchFilter, setBatchFilter] = useState(ALL_CUSTOMERS_BATCH);
   const [deletingBatch, setDeletingBatch] = useState(false);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
@@ -62,7 +63,7 @@ export default function CustomersPage() {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
     if (search) params.set("search", search);
-    if (batchFilter !== ALL_BATCHES) params.set("batch", batchFilter);
+    if (batchFilter !== ALL_CUSTOMERS_BATCH) params.set("batch", batchFilter);
     const res = await fetch(`/api/customers?${params.toString()}`);
     const json = await res.json();
     setLoading(false);
@@ -92,7 +93,7 @@ export default function CustomersPage() {
   }, [loadBatches]);
 
   async function handleDeleteBatch() {
-    if (batchFilter === ALL_BATCHES) return;
+    if (batchFilter === ALL_CUSTOMERS_BATCH) return;
     if (!confirm(`Xoá toàn bộ khách hàng trong lô "${batchFilter}"? Không thể hoàn tác.`)) return;
     setDeletingBatch(true);
     const res = await fetch(`/api/customers/import-batches?batch=${encodeURIComponent(batchFilter)}`, {
@@ -105,7 +106,7 @@ export default function CustomersPage() {
       return;
     }
     toast.success(`Đã xoá ${json.deleted} khách hàng thuộc lô "${batchFilter}"`);
-    setBatchFilter(ALL_BATCHES);
+    setBatchFilter(ALL_CUSTOMERS_BATCH);
     setPage(1);
     load();
     loadBatches();
@@ -123,6 +124,12 @@ export default function CustomersPage() {
 
   async function handleSave() {
     if (!editing) return;
+    if (!editing.phone && !editing.zalo_uid) {
+      return toast.error("Cần ít nhất Số điện thoại hoặc Zalo UID");
+    }
+    if (editing.phone && !isValidVietnamesePhone(editing.phone)) {
+      return toast.error("SĐT không hợp lệ (cần đúng định dạng số VN, 10-11 số)");
+    }
     const isNew = !editing.id;
     const url = isNew ? "/api/customers" : `/api/customers/${editing.id}`;
     const res = await fetch(url, {
@@ -131,8 +138,8 @@ export default function CustomersPage() {
       body: JSON.stringify({
         customer_code: editing.customer_code || undefined,
         name: editing.name,
-        phone: editing.phone,
-        zalo_uid: editing.zalo_uid || undefined,
+        phone: editing.phone || (isNew ? undefined : null),
+        zalo_uid: editing.zalo_uid || (isNew ? undefined : null),
       }),
     });
     const json = await res.json();
@@ -184,14 +191,18 @@ export default function CustomersPage() {
           value={batchFilter}
           onValueChange={(v) => {
             setPage(1);
-            setBatchFilter(v ?? ALL_BATCHES);
+            setBatchFilter(v ?? ALL_CUSTOMERS_BATCH);
+          }}
+          items={{
+            [ALL_CUSTOMERS_BATCH]: `— ${ALL_CUSTOMERS_LABEL} —`,
+            ...Object.fromEntries(batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])),
           }}
         >
           <SelectTrigger className="w-64">
             <SelectValue placeholder="Lọc theo lô import" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL_BATCHES}>— Tất cả khách hàng —</SelectItem>
+            <SelectItem value={ALL_CUSTOMERS_BATCH}>— {ALL_CUSTOMERS_LABEL} —</SelectItem>
             {batches.map((b) => (
               <SelectItem key={b.import_batch} value={b.import_batch}>
                 {b.import_batch} ({b.customer_count})
@@ -199,7 +210,7 @@ export default function CustomersPage() {
             ))}
           </SelectContent>
         </Select>
-        {batchFilter !== ALL_BATCHES && (
+        {batchFilter !== ALL_CUSTOMERS_BATCH && (
           <Button variant="destructive" size="sm" onClick={handleDeleteBatch} disabled={deletingBatch}>
             {deletingBatch ? "Đang xoá..." : "Xoá cả lô này"}
           </Button>
@@ -234,7 +245,7 @@ export default function CustomersPage() {
               <TableRow key={c.id}>
                 <TableCell>{c.customer_code}</TableCell>
                 <TableCell>{c.name}</TableCell>
-                <TableCell>{c.phone}</TableCell>
+                <TableCell>{c.phone ?? "—"}</TableCell>
                 <TableCell>{c.zalo_uid ?? "—"}</TableCell>
                 <TableCell className="text-right space-x-2">
                   <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
@@ -299,9 +310,12 @@ export default function CustomersPage() {
               <div className="space-y-1">
                 <Label>Số điện thoại</Label>
                 <Input
-                  value={editing.phone}
+                  value={editing.phone ?? ""}
                   onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Cần ít nhất SĐT hoặc Zalo UID — có thể để trống SĐT nếu đã có UID.
+                </p>
               </div>
               <div className="space-y-1">
                 <Label>Zalo UID (nếu biết)</Label>

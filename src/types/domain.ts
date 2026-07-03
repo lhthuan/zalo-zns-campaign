@@ -44,7 +44,7 @@ export interface ImportedRecipientRow {
   rowIndex: number;
   customer_code?: string;
   name?: string;
-  phone: string;
+  phone?: string;
   zalo_uid?: string;
   template_data: Record<string, string>;
 }

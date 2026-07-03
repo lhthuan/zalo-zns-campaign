@@ -27,6 +27,8 @@ interface ZaloTemplateParam {
   name: string;
   require: boolean;
   type: string;
+  maxLength?: number;
+  minLength?: number;
 }
 
 interface ZaloTemplate {
@@ -39,14 +41,14 @@ interface ZaloTemplate {
 interface Customer {
   id: string;
   name: string;
-  phone: string;
+  phone: string | null;
   zalo_uid: string | null;
 }
 
 interface SendResult {
   customerId: string;
   name: string;
-  phone: string;
+  phone: string | null;
   sendMode: "uid" | "phone";
   success: boolean;
   zaloMsgId: string | null;
@@ -58,8 +60,8 @@ export default function SendTestPage() {
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [search, setSearch] = useState("");
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchResults, setSearchResults] = useState<Customer[]>([]);
+  const [selected, setSelected] = useState<Customer[]>([]);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
@@ -72,29 +74,37 @@ export default function SendTestPage() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams({ pageSize: "20" });
-    if (search) params.set("search", search);
-    fetch(`/api/customers?${params.toString()}`)
-      .then((res) => res.json())
-      .then((json) => setCustomers(json.data ?? []))
-      .catch(() => toast.error("Không tải được danh sách khách hàng"));
+    const timeout = setTimeout(() => {
+      if (!search.trim()) {
+        setSearchResults([]);
+        return;
+      }
+      const params = new URLSearchParams({ pageSize: "20", search });
+      fetch(`/api/customers?${params.toString()}`)
+        .then((res) => res.json())
+        .then((json) => setSearchResults(json.data ?? []))
+        .catch(() => toast.error("Không tải được danh sách khách hàng"));
+    }, 250);
+    return () => clearTimeout(timeout);
   }, [search]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
+  const templateItems = Object.fromEntries(templates.map((t) => [t.id, t.template_name]));
+  const selectedIds = new Set(selected.map((c) => c.id));
 
-  function toggleCustomer(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function addCustomer(c: Customer) {
+    if (selectedIds.has(c.id)) return;
+    setSelected((prev) => [...prev, c]);
+  }
+
+  function removeCustomer(id: string) {
+    setSelected((prev) => prev.filter((c) => c.id !== id));
   }
 
   async function handleSend() {
     if (!templateId) return toast.error("Chọn template");
-    if (selectedIds.size === 0) return toast.error("Chọn ít nhất 1 khách hàng");
+    if (selected.length === 0) return toast.error("Chọn ít nhất 1 khách hàng");
 
     const missingRequired = params.filter((p) => p.require && !paramValues[p.name]);
     if (missingRequired.length > 0) {
@@ -108,7 +118,7 @@ export default function SendTestPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         template_id: templateId,
-        customer_ids: [...selectedIds],
+        customer_ids: selected.map((c) => c.id),
         template_data: paramValues,
       }),
     });
@@ -139,8 +149,8 @@ export default function SendTestPage() {
           <CardTitle>1. Chọn template</CardTitle>
         </CardHeader>
         <CardContent>
-          <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")}>
-            <SelectTrigger>
+          <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")} items={templateItems}>
+            <SelectTrigger className="w-full">
               <SelectValue placeholder="Chọn template" />
             </SelectTrigger>
             <SelectContent>
@@ -159,9 +169,14 @@ export default function SendTestPage() {
                 <div key={p.name} className="space-y-1">
                   <Label>
                     {p.name} {p.require && <span className="text-destructive">*</span>}
+                    <span className="ml-2 font-normal text-xs text-muted-foreground">
+                      {p.type}
+                      {(p.minLength || p.maxLength) && ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`}
+                    </span>
                   </Label>
                   <Input
                     value={paramValues[p.name] ?? ""}
+                    maxLength={p.maxLength}
                     onChange={(e) => setParamValues((m) => ({ ...m, [p.name]: e.target.value }))}
                   />
                 </div>
@@ -173,40 +188,58 @@ export default function SendTestPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>2. Chọn khách hàng ({selectedIds.size} đã chọn)</CardTitle>
+          <CardTitle>2. Chọn khách hàng ({selected.length} đã chọn)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {selected.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selected.map((c) => (
+                <Badge key={c.id} variant="secondary" className="gap-1 py-1 pr-1 pl-2 text-sm">
+                  {c.name}
+                  <button
+                    type="button"
+                    onClick={() => removeCustomer(c.id)}
+                    className="ml-1 rounded-full px-1 hover:bg-black/10"
+                    aria-label={`Bỏ chọn ${c.name}`}
+                  >
+                    ×
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+
           <Input
-            placeholder="Tìm theo tên, SĐT, mã KH..."
+            placeholder="Tìm theo tên, SĐT, mã KH... rồi bấm để thêm vào danh sách gửi"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10"></TableHead>
-                <TableHead>Tên</TableHead>
-                <TableHead>SĐT</TableHead>
-                <TableHead>Zalo UID</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {customers.map((c) => (
-                <TableRow
-                  key={c.id}
-                  className="cursor-pointer"
-                  onClick={() => toggleCustomer(c.id)}
-                >
-                  <TableCell>
-                    <input type="checkbox" checked={selectedIds.has(c.id)} readOnly />
-                  </TableCell>
-                  <TableCell>{c.name}</TableCell>
-                  <TableCell>{c.phone}</TableCell>
-                  <TableCell>{c.zalo_uid ?? "—"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+
+          {searchResults.length > 0 && (
+            <div className="max-h-64 overflow-y-auto rounded-md border">
+              <Table>
+                <TableBody>
+                  {searchResults.map((c) => {
+                    const already = selectedIds.has(c.id);
+                    return (
+                      <TableRow
+                        key={c.id}
+                        className={already ? "opacity-50" : "cursor-pointer"}
+                        onClick={() => addCustomer(c)}
+                      >
+                        <TableCell>{c.name}</TableCell>
+                        <TableCell>{c.phone ?? "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{c.zalo_uid ?? "—"}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {already ? "Đã chọn" : "+ Thêm"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -234,10 +267,10 @@ export default function SendTestPage() {
                 {results.map((r) => (
                   <TableRow key={r.customerId}>
                     <TableCell>{r.name}</TableCell>
-                    <TableCell>{r.phone}</TableCell>
+                    <TableCell>{r.phone ?? "—"}</TableCell>
                     <TableCell>{r.sendMode}</TableCell>
                     <TableCell>
-                      <Badge variant={r.success ? "default" : "destructive"}>
+                      <Badge variant={r.success ? "success" : "destructive"}>
                         {r.success ? "Thành công" : "Thất bại"}
                       </Badge>
                     </TableCell>

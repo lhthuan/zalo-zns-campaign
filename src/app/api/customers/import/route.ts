@@ -2,102 +2,93 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { parseSpreadsheet } from "@/lib/spreadsheet/import";
+import { validateMappedCustomer, type MappedCustomerRow } from "@/lib/spreadsheet/import";
 
-const mappingSchema = z.object({
-  customer_code: z.string().optional(),
-  name: z.string().optional(),
-  phone: z.string(),
-  zalo_uid: z.string().optional(),
+const rowSchema = z.object({
+  customer_code: z.string().nullable(),
+  name: z.string().trim().min(1),
+  phone: z.string().nullable(),
+  zalo_uid: z.string().nullable(),
+  extra_fields: z.record(z.string(), z.string()),
 });
 
-function stripExtension(fileName: string): string {
-  return fileName.replace(/\.[^./\\]+$/, "");
-}
+const bodySchema = z.object({
+  batch_name: z.string().trim().min(1),
+  // Rows are validated client-side (preview step) before this call, but we
+  // never trust the client alone — validateMappedCustomer() re-checks below.
+  rows: z.array(rowSchema).min(1).max(20000),
+});
 
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-function cell(row: Record<string, unknown>, column: string | undefined): string {
-  if (!column || FORBIDDEN_KEYS.has(column)) return "";
-  const value = Object.prototype.hasOwnProperty.call(row, column) ? row[column] : undefined;
-  return value == null ? "" : String(value).trim();
-}
+type StampedRow = MappedCustomerRow & { import_batch: string };
 
 export async function POST(request: NextRequest) {
   try {
     await requireUser();
-
-    const formData = await request.formData();
-    const file = formData.get("file");
-    const mappingRaw = formData.get("mapping");
-    const batchNameRaw = formData.get("batch_name");
-    if (!(file instanceof File) || typeof mappingRaw !== "string") {
-      return NextResponse.json({ error: "Missing file or mapping" }, { status: 400 });
-    }
-    const mapping = mappingSchema.parse(JSON.parse(mappingRaw));
-    const batchName =
-      (typeof batchNameRaw === "string" ? batchNameRaw.trim() : "") || stripExtension(file.name);
-
-    const buffer = await file.arrayBuffer();
-    const rows = parseSpreadsheet(buffer);
-
-    const mappedColumns = new Set(
-      [mapping.customer_code, mapping.name, mapping.phone, mapping.zalo_uid].filter(
-        (v): v is string => Boolean(v)
-      )
-    );
-
-    const customers = rows
-      .map((row) => {
-        const phone = cell(row, mapping.phone);
-        if (!phone) return null;
-
-        const extra_fields: Record<string, string> = {};
-        for (const key of Object.keys(row)) {
-          if (mappedColumns.has(key) || FORBIDDEN_KEYS.has(key)) continue;
-          extra_fields[key] = cell(row, key);
-        }
-
-        // zalo_uid is intentionally omitted (not set to null) when the file has no
-        // value for it, so re-importing a phone list without a UID column doesn't
-        // wipe out a UID already known for that customer from a prior import/send.
-        const zaloUid = cell(row, mapping.zalo_uid);
-        return {
-          customer_code: cell(row, mapping.customer_code) || null,
-          name: cell(row, mapping.name) || phone,
-          phone,
-          import_batch: batchName,
-          ...(zaloUid ? { zalo_uid: zaloUid } : {}),
-          extra_fields,
-        };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null);
-
-    if (customers.length === 0) {
-      return NextResponse.json({ error: "No valid rows (missing phone) found in file" }, { status: 400 });
-    }
-
-    // PostgREST upsert derives its ON CONFLICT DO UPDATE SET columns from the
-    // union of keys across the whole batch — if even one row includes
-    // zalo_uid, every other row in the same batch gets zalo_uid overwritten
-    // with NULL. Split into two upserts so rows without a UID value never
-    // touch that column at all.
-    const withUid = customers.filter((c) => "zalo_uid" in c);
-    const withoutUid = customers.filter((c) => !("zalo_uid" in c));
-
+    const body = bodySchema.parse(await request.json());
     const supabase = createAdminClient();
-    let imported = 0;
-    for (const group of [withUid, withoutUid]) {
-      if (group.length === 0) continue;
-      const { data, error } = await supabase
-        .from("customers")
-        .upsert(group, { onConflict: "phone", ignoreDuplicates: false })
-        .select("id");
-      if (error) throw error;
-      imported += data?.length ?? 0;
+
+    const withPhone: StampedRow[] = [];
+    const uidOnly: StampedRow[] = [];
+    let rejected = 0;
+
+    for (const row of body.rows) {
+      if (validateMappedCustomer(row)) {
+        rejected++;
+        continue;
+      }
+      const stamped: StampedRow = { ...row, import_batch: body.batch_name };
+      if (stamped.phone) withPhone.push(stamped);
+      else uidOnly.push(stamped);
     }
 
-    return NextResponse.json({ imported, totalRows: rows.length });
+    let imported = 0;
+
+    if (withPhone.length > 0) {
+      // Same reasoning as elsewhere: PostgREST's upsert derives its ON CONFLICT
+      // SET columns from the whole batch's key union, so rows without a UID
+      // must never share a batch with rows that have one.
+      const withUid = withPhone.filter((r) => r.zalo_uid);
+      const withoutUid = withPhone.filter((r) => !r.zalo_uid);
+      for (const group of [withUid, withoutUid]) {
+        if (group.length === 0) continue;
+        const { data, error } = await supabase
+          .from("customers")
+          .upsert(group, { onConflict: "phone", ignoreDuplicates: false })
+          .select("id");
+        if (error) throw error;
+        imported += data?.length ?? 0;
+      }
+    }
+
+    // zalo_uid's unique index is partial (where zalo_uid is not null), which
+    // Postgres can't use as a plain ON CONFLICT arbiter through PostgREST —
+    // so phone-less rows are upserted by hand instead.
+    for (const row of uidOnly) {
+      const { data: existing, error: findError } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("zalo_uid", row.zalo_uid as string)
+        .maybeSingle();
+      if (findError) throw findError;
+
+      if (existing) {
+        const { error } = await supabase
+          .from("customers")
+          .update({
+            name: row.name,
+            customer_code: row.customer_code,
+            import_batch: row.import_batch,
+          })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("customers").insert(row);
+        if (error) throw error;
+      }
+      imported++;
+    }
+
+    return NextResponse.json({ imported, totalRows: body.rows.length, rejected });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

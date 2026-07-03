@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { isValidVietnamesePhone } from "@/lib/phone";
 
-const createCustomerSchema = z.object({
-  customer_code: z.string().trim().min(1).optional(),
-  name: z.string().trim().min(1),
-  phone: z.string().trim().min(1),
-  zalo_uid: z.string().trim().min(1).optional(),
-  extra_fields: z.record(z.string(), z.unknown()).optional(),
-});
+const createCustomerSchema = z
+  .object({
+    customer_code: z.string().trim().min(1).optional(),
+    name: z.string().trim().min(1),
+    phone: z.string().trim().min(1).optional(),
+    zalo_uid: z.string().trim().min(1).optional(),
+    extra_fields: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => v.phone || v.zalo_uid, {
+    message: "Cần ít nhất Số điện thoại hoặc Zalo UID",
+    path: ["phone"],
+  });
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,6 +57,9 @@ export async function POST(request: NextRequest) {
   try {
     await requireUser();
     const body = createCustomerSchema.parse(await request.json());
+    if (body.phone && !isValidVietnamesePhone(body.phone)) {
+      return NextResponse.json({ error: "SĐT không hợp lệ (cần đúng định dạng số VN)" }, { status: 400 });
+    }
     const supabase = createAdminClient();
 
     const { data, error } = await supabase.from("customers").insert(body).select().single();

@@ -23,6 +23,7 @@ interface Campaign {
   total_recipients: number;
   sent_count: number;
   failed_count: number;
+  is_hidden: boolean;
   zalo_templates: { template_name: string; tag: string | null } | null;
 }
 
@@ -74,6 +75,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     return () => clearInterval(interval);
   }, [campaign, load]);
 
+  async function handleToggleHidden() {
+    if (!campaign) return;
+    const res = await fetch(`/api/campaigns/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_hidden: !campaign.is_hidden }),
+    });
+    if (!res.ok) {
+      toast.error("Không cập nhật được");
+      return;
+    }
+    toast.success(campaign.is_hidden ? "Đã bỏ ẩn" : "Đã ẩn chiến dịch");
+    load();
+  }
+
   async function handleSend() {
     setSending(true);
     const res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
@@ -103,7 +119,15 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             Template: {campaign.zalo_templates?.template_name ?? "—"}
           </p>
         </div>
-        <Badge>{STATUS_LABEL[campaign.status] ?? campaign.status}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge>{STATUS_LABEL[campaign.status] ?? campaign.status}</Badge>
+          <Button variant="outline" size="sm" render={<Link href={`/campaigns/new?copyFrom=${id}`} />}>
+            Sao chép
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleToggleHidden}>
+            {campaign.is_hidden ? "Bỏ ẩn" : "Ẩn"}
+          </Button>
+        </div>
       </div>
 
       <Card>

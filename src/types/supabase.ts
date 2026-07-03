@@ -12,6 +12,8 @@ export type CampaignStatus =
   | "failed";
 export type SendMode = "uid" | "phone";
 export type RecipientStatus = "pending" | "sent" | "failed";
+export type CampaignCreationMode = "broadcast" | "custom";
+export type ZnsPricingTag = "TRANSACTION" | "CUSTOMER_CARE" | "PROMOTION" | "OTHER";
 
 export interface Database {
   public: {
@@ -38,7 +40,7 @@ export interface Database {
           id: string;
           customer_code: string | null;
           name: string;
-          phone: string;
+          phone: string | null;
           zalo_uid: string | null;
           import_batch: string | null;
           extra_fields: Record<string, unknown>;
@@ -49,7 +51,7 @@ export interface Database {
           id?: string;
           customer_code?: string | null;
           name: string;
-          phone: string;
+          phone?: string | null;
           zalo_uid?: string | null;
           import_batch?: string | null;
           extra_fields?: Record<string, unknown>;
@@ -127,6 +129,10 @@ export interface Database {
           sent_count: number;
           failed_count: number;
           source_file_name: string | null;
+          is_hidden: boolean;
+          creation_mode: CampaignCreationMode | null;
+          customer_batch: string | null;
+          fixed_template_data: Record<string, unknown> | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -140,6 +146,10 @@ export interface Database {
           sent_count?: number;
           failed_count?: number;
           source_file_name?: string | null;
+          is_hidden?: boolean;
+          creation_mode?: CampaignCreationMode | null;
+          customer_batch?: string | null;
+          fixed_template_data?: Record<string, unknown> | null;
           created_by?: string | null;
           updated_at?: string;
         };
@@ -159,7 +169,7 @@ export interface Database {
           id: string;
           campaign_id: string;
           customer_id: string | null;
-          phone: string;
+          phone: string | null;
           zalo_uid: string | null;
           template_data: Record<string, unknown>;
           send_mode: SendMode;
@@ -176,7 +186,7 @@ export interface Database {
           id?: string;
           campaign_id: string;
           customer_id?: string | null;
-          phone: string;
+          phone?: string | null;
           zalo_uid?: string | null;
           template_data: Record<string, unknown>;
           send_mode: SendMode;
@@ -206,6 +216,20 @@ export interface Database {
             referencedColumns: ["id"];
           },
         ];
+      };
+      zns_pricing: {
+        Row: {
+          tag: ZnsPricingTag;
+          price_vnd: number;
+          updated_at: string;
+        };
+        Insert: {
+          tag: ZnsPricingTag;
+          price_vnd?: number;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["zns_pricing"]["Insert"]>;
+        Relationships: [];
       };
     };
     Views: Record<string, never>;

@@ -40,6 +40,18 @@ export async function POST(request: NextRequest) {
 
     const results = await mapWithConcurrency(customers, 5, async (customer) => {
       const sendMode: "uid" | "phone" = customer.zalo_uid ? "uid" : "phone";
+      if (sendMode === "phone" && !customer.phone) {
+        return {
+          customerId: customer.id,
+          name: customer.name,
+          phone: customer.phone,
+          sendMode,
+          success: false,
+          zaloMsgId: null,
+          errorCode: null,
+          errorMessage: "Khách hàng không có SĐT lẫn Zalo UID — không gửi được.",
+        };
+      }
       try {
         let result: ZaloUidSendResult | ZaloPhoneSendResult;
         let msgId: string | undefined;
@@ -53,7 +65,7 @@ export async function POST(request: NextRequest) {
           msgId = (result as ZaloUidSendResult).data?.message_id;
         } else {
           result = await sendPhoneTemplate({
-            phone: customer.phone,
+            phone: customer.phone!,
             templateId: template.template_id,
             templateData: body.template_data,
             trackingId: crypto.randomBytes(16).toString("hex"),

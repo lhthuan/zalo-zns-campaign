@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 
 export interface ReportRow {
-  phone: string;
+  phone: string | null;
   customer_name: string | null;
   send_mode: string;
   status: string;

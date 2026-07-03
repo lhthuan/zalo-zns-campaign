@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { isValidVietnamesePhone } from "@/lib/phone";
 
 const updateCustomerSchema = z.object({
   customer_code: z.string().trim().min(1).optional().nullable(),
   name: z.string().trim().min(1).optional(),
-  phone: z.string().trim().min(1).optional(),
+  phone: z.string().trim().min(1).optional().nullable(),
   zalo_uid: z.string().trim().min(1).optional().nullable(),
   extra_fields: z.record(z.string(), z.unknown()).optional(),
 });
@@ -36,6 +37,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     await requireUser();
     const { id } = await params;
     const body = updateCustomerSchema.parse(await request.json());
+    if (body.phone && !isValidVietnamesePhone(body.phone)) {
+      return NextResponse.json({ error: "SĐT không hợp lệ (cần đúng định dạng số VN)" }, { status: 400 });
+    }
     const supabase = createAdminClient();
 
     const { data, error } = await supabase
