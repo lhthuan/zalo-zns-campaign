@@ -231,6 +231,75 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["zns_pricing"]["Insert"]>;
         Relationships: [];
       };
+      api_keys: {
+        Row: {
+          id: string;
+          name: string;
+          key_hash: string;
+          key_prefix: string;
+          is_active: boolean;
+          created_at: string;
+          last_used_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          key_hash: string;
+          key_prefix: string;
+          is_active?: boolean;
+          last_used_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["api_keys"]["Insert"]>;
+        Relationships: [];
+      };
+      api_send_log: {
+        Row: {
+          id: string;
+          api_key_id: string | null;
+          customer_id: string | null;
+          phone: string;
+          zalo_uid: string | null;
+          template_id: string;
+          template_data: Record<string, unknown>;
+          send_mode: SendMode;
+          success: boolean;
+          zalo_msg_id: string | null;
+          error_code: string | null;
+          error_message: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          api_key_id?: string | null;
+          customer_id?: string | null;
+          phone: string;
+          zalo_uid?: string | null;
+          template_id: string;
+          template_data: Record<string, unknown>;
+          send_mode: SendMode;
+          success: boolean;
+          zalo_msg_id?: string | null;
+          error_code?: string | null;
+          error_message?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["api_send_log"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "api_send_log_api_key_id_fkey";
+            columns: ["api_key_id"];
+            isOneToOne: false;
+            referencedRelation: "api_keys";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "api_send_log_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {

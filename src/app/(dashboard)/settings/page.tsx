@@ -7,11 +7,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface SettingsData {
   zaloAppId: string | null;
   hasSecretKey: boolean;
   updatedAt: string | null;
+}
+
+interface ApiKeyRow {
+  id: string;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
 }
 
 interface LogEntry {
@@ -37,6 +61,10 @@ export default function SettingsPage() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [pricing, setPricing] = useState<Record<string, number>>({});
   const [savingPricing, setSavingPricing] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [creatingKey, setCreatingKey] = useState(false);
+  const [newPlaintextKey, setNewPlaintextKey] = useState<string | null>(null);
 
   function addLog(message: string, level: LogEntry["level"] = "info") {
     setLog((prev) => [{ time: new Date().toLocaleTimeString("vi-VN"), message, level }, ...prev]);
@@ -60,7 +88,52 @@ export default function SettingsPage() {
         setPricing(map);
       })
       .catch(() => toast.error("Không tải được cấu hình giá"));
+    loadApiKeys();
   }, []);
+
+  async function loadApiKeys() {
+    const res = await fetch("/api/settings/api-keys");
+    const json = await res.json();
+    if (res.ok) setApiKeys(json.data ?? []);
+  }
+
+  async function handleCreateKey() {
+    if (!newKeyName.trim()) return toast.error("Đặt tên cho hệ thống dùng key này");
+    setCreatingKey(true);
+    const res = await fetch("/api/settings/api-keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newKeyName.trim() }),
+    });
+    const json = await res.json();
+    setCreatingKey(false);
+    if (!res.ok) {
+      toast.error(json.error ? JSON.stringify(json.error) : "Tạo key thất bại");
+      return;
+    }
+    setNewPlaintextKey(json.data.plaintext);
+    setNewKeyName("");
+    loadApiKeys();
+  }
+
+  async function handleToggleKey(key: ApiKeyRow) {
+    const res = await fetch(`/api/settings/api-keys/${key.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !key.is_active }),
+    });
+    if (!res.ok) return toast.error("Không cập nhật được");
+    toast.success(key.is_active ? "Đã tắt key" : "Đã bật lại key");
+    loadApiKeys();
+  }
+
+  async function handleDeleteKey(key: ApiKeyRow) {
+    if (!confirm(`Xoá hẳn key "${key.name}"? Hệ thống dùng key này sẽ không gửi được nữa.`)) return;
+    const res = await fetch(`/api/settings/api-keys/${key.id}`, { method: "DELETE" });
+    if (!res.ok) return toast.error("Không xoá được");
+    toast.success("Đã xoá key");
+    loadApiKeys();
+  }
 
   async function handleSavePricing() {
     setSavingPricing(true);
@@ -223,6 +296,92 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>5. API key cho hệ thống ngoài (POST /api/sendzns)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Cấp 1 key riêng cho từng hệ thống ngoài (website, POS, CRM...) muốn tự gọi gửi ZNS trực
+            tiếp, không qua giao diện này. Mỗi key xoá/tắt riêng không ảnh hưởng hệ thống khác.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Tên hệ thống, vd: Website đặt hàng"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+            />
+            <Button onClick={handleCreateKey} disabled={creatingKey}>
+              {creatingKey ? "Đang tạo..." : "Tạo key mới"}
+            </Button>
+          </div>
+
+          {apiKeys.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tên</TableHead>
+                  <TableHead>Key</TableHead>
+                  <TableHead>Trạng thái</TableHead>
+                  <TableHead>Dùng lần cuối</TableHead>
+                  <TableHead className="text-right">Hành động</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {apiKeys.map((k) => (
+                  <TableRow key={k.id}>
+                    <TableCell>{k.name}</TableCell>
+                    <TableCell className="font-mono text-xs">{k.key_prefix}…</TableCell>
+                    <TableCell>
+                      <Badge variant={k.is_active ? "success" : "outline"}>
+                        {k.is_active ? "Đang hoạt động" : "Đã tắt"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {k.last_used_at ? new Date(k.last_used_at).toLocaleString("vi-VN") : "Chưa dùng"}
+                    </TableCell>
+                    <TableCell className="text-right space-x-2">
+                      <Button variant="ghost" size="sm" onClick={() => handleToggleKey(k)}>
+                        {k.is_active ? "Tắt" : "Bật"}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDeleteKey(k)}>
+                        Xoá
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={newPlaintextKey != null} onOpenChange={(open) => !open && setNewPlaintextKey(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Đã tạo key mới</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-destructive">
+              Chỉ hiển thị đúng 1 lần — copy và lưu lại ngay, đóng cửa sổ này sẽ không xem lại được.
+            </p>
+            <p className="rounded-md border bg-muted/30 p-3 font-mono text-sm break-all">
+              {newPlaintextKey}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (newPlaintextKey) navigator.clipboard.writeText(newPlaintextKey);
+                toast.success("Đã copy vào clipboard");
+              }}
+            >
+              Copy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
