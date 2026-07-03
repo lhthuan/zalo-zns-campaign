@@ -3,19 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-
-const LINKS = [
-  { href: "/dashboard", label: "Tổng quan" },
-  { href: "/customers", label: "Khách hàng" },
-  { href: "/templates", label: "Template" },
-  { href: "/campaigns", label: "Chiến dịch" },
-  { href: "/send-test", label: "Gửi thử" },
-  { href: "/api-logs", label: "Nhật ký API" },
-  { href: "/settings", label: "Cài đặt" },
-];
+import { useTranslation } from "@/components/i18n-provider";
 
 export function NavLinks() {
   const pathname = usePathname();
+  const { t } = useTranslation("nav");
+
+  const LINKS = [
+    { href: "/dashboard", label: t("dashboard") },
+    { href: "/customers", label: t("customers") },
+    { href: "/templates", label: t("templates") },
+    { href: "/campaigns", label: t("campaigns") },
+    { href: "/send-test", label: t("sendTest") },
+    { href: "/api-logs", label: t("apiLogs") },
+    { href: "/settings", label: t("settings") },
+  ];
+
   return (
     <nav className="flex items-center gap-1">
       {LINKS.map((link) => {

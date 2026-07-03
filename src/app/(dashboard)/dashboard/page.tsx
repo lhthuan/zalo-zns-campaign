@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface CampaignRow {
   id: string;
@@ -58,22 +59,22 @@ interface Overview {
   totals: Totals;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Nháp",
-  sending: "Đang gửi",
-  completed: "Hoàn tất",
-  completed_with_errors: "Hoàn tất (có lỗi)",
-  failed: "Thất bại",
-};
-
-const RANGE_OPTIONS = { "7": "7 ngày qua", "30": "30 ngày qua", "90": "90 ngày qua", all: "Toàn bộ" };
-
-function Donut({ success, failed, pending }: { success: number; failed: number; pending: number }) {
+function Donut({
+  success,
+  failed,
+  pending,
+  labels,
+}: {
+  success: number;
+  failed: number;
+  pending: number;
+  labels: { success: string; failed: string; pending: string; noData: string };
+}) {
   const total = success + failed + pending;
   if (total === 0) {
     return (
       <div className="flex h-40 w-40 items-center justify-center rounded-full border-8 border-muted text-xs text-muted-foreground">
-        Chưa có dữ liệu
+        {labels.noData}
       </div>
     );
   }
@@ -91,21 +92,21 @@ function Donut({ success, failed, pending }: { success: number; failed: number; 
       >
         <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-background">
           <span className="text-2xl font-semibold">{successRate}%</span>
-          <span className="text-xs text-muted-foreground">thành công</span>
+          <span className="text-xs text-muted-foreground">{labels.success}</span>
         </div>
       </div>
       <div className="space-y-2 text-sm">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-emerald-500" />
-          Thành công: <strong>{success.toLocaleString("vi-VN")}</strong>
+          {labels.success}: <strong>{success.toLocaleString("vi-VN")}</strong>
         </div>
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-red-500" />
-          Thất bại: <strong>{failed.toLocaleString("vi-VN")}</strong>
+          {labels.failed}: <strong>{failed.toLocaleString("vi-VN")}</strong>
         </div>
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-zinc-300" />
-          Còn lại: <strong>{pending.toLocaleString("vi-VN")}</strong>
+          {labels.pending}: <strong>{pending.toLocaleString("vi-VN")}</strong>
         </div>
       </div>
     </div>
@@ -113,6 +114,14 @@ function Donut({ success, failed, pending }: { success: number; failed: number; 
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation("dashboard");
+  const { t: tStatus } = useTranslation("campaignStatus");
+  const RANGE_OPTIONS = {
+    "7": t("range7"),
+    "30": t("range30"),
+    "90": t("range90"),
+    all: t("rangeAll"),
+  };
   const [range, setRange] = useState<keyof typeof RANGE_OPTIONS>("30");
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,7 +144,7 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
-  if (loading && !data) return <p className="text-muted-foreground">Đang tải...</p>;
+  if (loading && !data) return <p className="text-muted-foreground">{t("noData")}</p>;
   if (!data) return null;
 
   const { totals, byCampaign, byChannel, topCustomers } = data;
@@ -151,10 +160,8 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Tổng quan</h1>
-          <p className="text-sm text-muted-foreground">
-            Tình hình gửi tin ZNS trên toàn hệ thống — chiến dịch, gửi thử, và API ngoài.
-          </p>
+          <h1 className="text-xl font-semibold">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
         <Select value={range} onValueChange={(v) => setRange((v as keyof typeof RANGE_OPTIONS) ?? "30")} items={RANGE_OPTIONS}>
           <SelectTrigger className="w-48">
@@ -173,25 +180,25 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Tổng số tin đã gửi</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">{t("totalSent")}</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{totalSent.toLocaleString("vi-VN")}</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Tỷ lệ thành công</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">{t("successRate")}</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold text-emerald-600">{successRate}%</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Tổng chi phí ước tính</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">{t("totalCost")}</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{formatVnd(totalCost)}</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Số chiến dịch</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">{t("campaignCount")}</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{totals.campaignCount}</CardContent>
         </Card>
@@ -200,50 +207,60 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Tỷ lệ thành công / thất bại</CardTitle>
+            <CardTitle>{t("successFailRatio")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Donut success={totalSent} failed={totalFailed} pending={totals.campaignPending} />
+            <Donut
+              success={totalSent}
+              failed={totalFailed}
+              pending={totals.campaignPending}
+              labels={{
+                success: t("success"),
+                failed: t("failed"),
+                pending: t("pending"),
+                noData: t("noData"),
+              }}
+            />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Theo nguồn gửi</CardTitle>
+            <CardTitle>{t("bySource")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="flex items-center justify-between border-b pb-2">
-              <span>Chiến dịch</span>
+              <span>{t("sourceCampaign")}</span>
               <span>
-                <strong className="text-emerald-600">{totals.campaignSent}</strong> thành công ·{" "}
-                <strong className="text-destructive">{totals.campaignFailed}</strong> lỗi ·{" "}
+                <strong className="text-emerald-600">{totals.campaignSent}</strong> {t("success")} ·{" "}
+                <strong className="text-destructive">{totals.campaignFailed}</strong> {t("failed")} ·{" "}
                 {formatVnd(totals.campaignCost)}
               </span>
             </div>
             <div className="flex items-center justify-between border-b pb-2">
-              <span>Gửi thử</span>
+              <span>{t("sourceTest")}</span>
               <span>
-                <strong className="text-emerald-600">{totals.testSent}</strong> thành công ·{" "}
-                <strong className="text-destructive">{totals.testFailed}</strong> lỗi ·{" "}
+                <strong className="text-emerald-600">{totals.testSent}</strong> {t("success")} ·{" "}
+                <strong className="text-destructive">{totals.testFailed}</strong> {t("failed")} ·{" "}
                 {formatVnd(totals.testCost)}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span>API ngoài</span>
+              <span>{t("sourceApi")}</span>
               <span>
-                <strong className="text-emerald-600">{totals.apiSent}</strong> thành công ·{" "}
-                <strong className="text-destructive">{totals.apiFailed}</strong> lỗi ·{" "}
+                <strong className="text-emerald-600">{totals.apiSent}</strong> {t("success")} ·{" "}
+                <strong className="text-destructive">{totals.apiFailed}</strong> {t("failed")} ·{" "}
                 {formatVnd(totals.apiCost)}
               </span>
             </div>
             {byChannel.length > 0 && (
               <div className="border-t pt-3">
-                <p className="mb-2 text-xs text-muted-foreground">Theo kênh (chiến dịch)</p>
+                <p className="mb-2 text-xs text-muted-foreground">{t("byChannel")}</p>
                 {byChannel.map((ch) => (
                   <div key={ch.send_mode} className="flex items-center justify-between">
                     <span>{ch.send_mode === "phone" ? "SĐT" : "UID"}</span>
                     <span>
-                      <strong>{ch.sent}</strong> tin · {formatVnd(ch.cost)}
+                      <strong>{ch.sent}</strong> {t("messagesUnit")} · {formatVnd(ch.cost)}
                     </span>
                   </div>
                 ))}
@@ -255,11 +272,11 @@ export default function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Theo chiến dịch</CardTitle>
+          <CardTitle>{t("byCampaign")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {byCampaign.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Chưa có chiến dịch nào.</p>
+            <p className="text-sm text-muted-foreground">{t("noCampaigns")}</p>
           ) : (
             byCampaign.map((c) => {
               const volume = c.sent + c.failed + c.pending;
@@ -273,7 +290,10 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-medium hover:underline">{c.name}</span>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="outline">{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                      <Badge variant="outline">
+                        {tStatus(c.status as "draft" | "sending" | "completed" | "completed_with_errors" | "failed") ??
+                          c.status}
+                      </Badge>
                       <span>{formatVnd(c.cost)}</span>
                     </div>
                   </div>
@@ -292,7 +312,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {c.sent} thành công · {c.failed} lỗi · {c.pending} còn lại
+                    {c.sent} {t("success")} · {c.failed} {t("failed")} · {c.pending} {t("pending")}
                   </p>
                 </Link>
               );
@@ -303,11 +323,11 @@ export default function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Khách hàng nhận nhiều tin nhất</CardTitle>
+          <CardTitle>{t("topCustomers")}</CardTitle>
         </CardHeader>
         <CardContent>
           {topCustomers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
+            <p className="text-sm text-muted-foreground">{t("noData")}</p>
           ) : (
             <div className="space-y-2">
               {topCustomers.map((c, i) => (
@@ -317,7 +337,9 @@ export default function DashboardPage() {
                     {c.name ?? c.phone ?? "—"}
                     {c.name && c.phone && <span className="text-muted-foreground"> · {c.phone}</span>}
                   </span>
-                  <strong>{c.message_count} tin</strong>
+                  <strong>
+                    {c.message_count} {t("messagesUnit")}
+                  </strong>
                 </div>
               ))}
             </div>

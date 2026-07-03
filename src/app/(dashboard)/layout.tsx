@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "@/components/logout-button";
 import { OaInfoBadge } from "@/components/oa-info-badge";
 import { NavLinks } from "@/components/nav-links";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { CopyrightFooter } from "@/components/copyright-footer";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -18,6 +20,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <NavLinks />
           </div>
           <div className="flex items-center gap-3">
+            <LanguageSwitcher />
             <OaInfoBadge />
             <span className="text-sm text-muted-foreground">{user?.email}</span>
             <LogoutButton />
@@ -26,9 +29,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
       <footer className="border-t py-4">
-        <p className="text-center text-xs text-muted-foreground">
-          © by ECM Trung Son Pharma {new Date().getFullYear()}
-        </p>
+        <CopyrightFooter />
       </footer>
     </div>
   );
