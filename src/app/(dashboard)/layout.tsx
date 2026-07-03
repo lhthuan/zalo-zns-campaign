@@ -27,6 +27,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <Link href="/send-test" className="text-sm text-muted-foreground hover:text-foreground">
               Gửi thử
             </Link>
+            <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
+              Cài đặt
+            </Link>
           </nav>
           <div className="flex items-center gap-3">
             <OaInfoBadge />

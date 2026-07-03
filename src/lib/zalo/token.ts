@@ -8,12 +8,20 @@ const LOCK_DURATION_MS = 30 * 1000;
 const LOCK_POLL_INTERVAL_MS = 500;
 const LOCK_POLL_MAX_ATTEMPTS = 10;
 
-function appId() {
-  return process.env.ZALO_APP_ID!;
+export interface ZaloCredentials {
+  appId: string;
+  secretKey: string;
 }
 
-function secretKey() {
-  return process.env.ZALO_APP_SECRET_KEY!;
+/** Zalo App ID/Secret are stored in the DB (app_settings), editable from /settings without a redeploy. */
+export async function getZaloCredentials(): Promise<ZaloCredentials> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from("app_settings").select("*").eq("id", 1).maybeSingle();
+  if (error) throw error;
+  if (!data?.zalo_app_id || !data?.zalo_app_secret_key) {
+    throw new Error("Chưa cấu hình Zalo App ID/Secret — vào trang Cài đặt để nhập.");
+  }
+  return { appId: data.zalo_app_id, secretKey: data.zalo_app_secret_key };
 }
 
 export function generatePkcePair() {
@@ -34,12 +42,15 @@ interface ZaloTokenResponse {
   error_reason?: string;
 }
 
-async function requestToken(body: Record<string, string>): Promise<ZaloTokenResponse> {
+async function requestToken(
+  credentials: ZaloCredentials,
+  body: Record<string, string>
+): Promise<ZaloTokenResponse> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      secret_key: secretKey(),
+      secret_key: credentials.secretKey,
     },
     body: new URLSearchParams(body).toString(),
   });
@@ -54,9 +65,10 @@ async function requestToken(body: Record<string, string>): Promise<ZaloTokenResp
 
 /** One-time bootstrap: exchange the OAuth authorization code for the first token pair. */
 export async function exchangeAuthorizationCode(code: string, codeVerifier: string) {
-  const token = await requestToken({
+  const credentials = await getZaloCredentials();
+  const token = await requestToken(credentials, {
     code,
-    app_id: appId(),
+    app_id: credentials.appId,
     grant_type: "authorization_code",
     code_verifier: codeVerifier,
   });
@@ -134,9 +146,10 @@ export async function getValidAccessToken(): Promise<string> {
   }
 
   try {
-    const token = await requestToken({
+    const credentials = await getZaloCredentials();
+    const token = await requestToken(credentials, {
       refresh_token: claimed.refresh_token,
-      app_id: appId(),
+      app_id: credentials.appId,
       grant_type: "refresh_token",
     });
     await persistToken(token);

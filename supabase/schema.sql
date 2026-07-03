@@ -57,6 +57,15 @@ create table public.zalo_oauth_tokens (
   updated_at timestamptz not null default now()
 );
 
+-- App ID/Secret Zalo lưu DB (không phải env var) để sửa qua trang /settings mà
+-- không cần redeploy. Chỉ service_role đọc/ghi được (xem RLS phía dưới).
+create table public.app_settings (
+  id smallint primary key default 1 check (id = 1),
+  zalo_app_id text,
+  zalo_app_secret_key text,
+  updated_at timestamptz not null default now()
+);
+
 create table public.campaigns (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -99,6 +108,7 @@ alter table public.profiles enable row level security;
 alter table public.customers enable row level security;
 alter table public.zalo_templates enable row level security;
 alter table public.zalo_oauth_tokens enable row level security;
+alter table public.app_settings enable row level security;
 alter table public.campaigns enable row level security;
 alter table public.campaign_recipients enable row level security;
 

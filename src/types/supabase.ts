@@ -99,6 +99,22 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["zalo_oauth_tokens"]["Insert"]>;
         Relationships: [];
       };
+      app_settings: {
+        Row: {
+          id: number;
+          zalo_app_id: string | null;
+          zalo_app_secret_key: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          zalo_app_id?: string | null;
+          zalo_app_secret_key?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["app_settings"]["Insert"]>;
+        Relationships: [];
+      };
       campaigns: {
         Row: {
           id: string;
