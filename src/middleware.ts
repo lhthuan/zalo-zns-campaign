@@ -58,5 +58,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Exclude any path with a file extension (e.g. .html, .png, .txt) so files in
+  // public/ — like Zalo's domain-verification HTML file — are served without
+  // requiring a login session.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };
