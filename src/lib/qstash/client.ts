@@ -1,5 +1,6 @@
 import "server-only";
 import { Client } from "@upstash/qstash";
+import { getAppUrl } from "@/lib/env";
 
 let client: Client | null = null;
 
@@ -11,7 +12,7 @@ export function getQStashClient(): Client {
 }
 
 export function processBatchUrl(campaignId: string): string {
-  return `${process.env.NEXT_PUBLIC_APP_URL}/api/campaigns/${campaignId}/process-batch`;
+  return `${getAppUrl()}/api/campaigns/${campaignId}/process-batch`;
 }
 
 export function batchDeduplicationId(campaignId: string, batchNumber: number): string {
