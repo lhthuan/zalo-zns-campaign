@@ -100,7 +100,7 @@ export async function getValidAccessToken(): Promise<string> {
     .from("zalo_oauth_tokens")
     .select("*")
     .eq("id", 1)
-    .single();
+    .maybeSingle();
   if (error) throw error;
   if (!row) throw new Error("zalo_oauth_tokens is empty — run the OAuth bootstrap flow first.");
 
