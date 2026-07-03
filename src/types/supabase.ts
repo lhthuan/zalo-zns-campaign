@@ -40,6 +40,7 @@ export interface Database {
           name: string;
           phone: string;
           zalo_uid: string | null;
+          import_batch: string | null;
           extra_fields: Record<string, unknown>;
           created_at: string;
           updated_at: string;
@@ -50,6 +51,7 @@ export interface Database {
           name: string;
           phone: string;
           zalo_uid?: string | null;
+          import_batch?: string | null;
           extra_fields?: Record<string, unknown>;
           updated_at?: string;
         };
@@ -207,7 +209,16 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      customer_import_batches: {
+        Args: Record<string, never>;
+        Returns: {
+          import_batch: string;
+          customer_count: number;
+          last_imported_at: string;
+        }[];
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

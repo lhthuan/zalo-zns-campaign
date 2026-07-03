@@ -21,6 +21,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface Customer {
   id: string;
@@ -30,13 +37,23 @@ interface Customer {
   zalo_uid: string | null;
 }
 
+interface ImportBatch {
+  import_batch: string;
+  customer_count: number;
+  last_imported_at: string;
+}
+
 const PAGE_SIZE = 20;
+const ALL_BATCHES = "__all__";
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [batchFilter, setBatchFilter] = useState(ALL_BATCHES);
+  const [deletingBatch, setDeletingBatch] = useState(false);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -45,6 +62,7 @@ export default function CustomersPage() {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
     if (search) params.set("search", search);
+    if (batchFilter !== ALL_BATCHES) params.set("batch", batchFilter);
     const res = await fetch(`/api/customers?${params.toString()}`);
     const json = await res.json();
     setLoading(false);
@@ -54,13 +72,44 @@ export default function CustomersPage() {
     }
     setCustomers(json.data);
     setTotal(json.total);
-  }, [page, search]);
+  }, [page, search, batchFilter]);
+
+  const loadBatches = useCallback(async () => {
+    const res = await fetch("/api/customers/import-batches");
+    const json = await res.json();
+    if (res.ok) setBatches(json.data ?? []);
+  }, []);
 
   useEffect(() => {
     // Standard fetch-on-mount: `load` awaits before calling setState, it isn't synchronous.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadBatches();
+  }, [loadBatches]);
+
+  async function handleDeleteBatch() {
+    if (batchFilter === ALL_BATCHES) return;
+    if (!confirm(`Xoá toàn bộ khách hàng trong lô "${batchFilter}"? Không thể hoàn tác.`)) return;
+    setDeletingBatch(true);
+    const res = await fetch(`/api/customers/import-batches?batch=${encodeURIComponent(batchFilter)}`, {
+      method: "DELETE",
+    });
+    const json = await res.json();
+    setDeletingBatch(false);
+    if (!res.ok) {
+      toast.error(json.error ?? "Không xoá được lô này");
+      return;
+    }
+    toast.success(`Đã xoá ${json.deleted} khách hàng thuộc lô "${batchFilter}"`);
+    setBatchFilter(ALL_BATCHES);
+    setPage(1);
+    load();
+    loadBatches();
+  }
 
   function openNew() {
     setEditing({ id: "", customer_code: "", name: "", phone: "", zalo_uid: "" });
@@ -121,15 +170,41 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <Input
-        placeholder="Tìm theo tên, SĐT, mã KH..."
-        value={search}
-        onChange={(e) => {
-          setPage(1);
-          setSearch(e.target.value);
-        }}
-        className="max-w-sm"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Tìm theo tên, SĐT, mã KH..."
+          value={search}
+          onChange={(e) => {
+            setPage(1);
+            setSearch(e.target.value);
+          }}
+          className="max-w-sm"
+        />
+        <Select
+          value={batchFilter}
+          onValueChange={(v) => {
+            setPage(1);
+            setBatchFilter(v ?? ALL_BATCHES);
+          }}
+        >
+          <SelectTrigger className="w-64">
+            <SelectValue placeholder="Lọc theo lô import" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_BATCHES}>— Tất cả khách hàng —</SelectItem>
+            {batches.map((b) => (
+              <SelectItem key={b.import_batch} value={b.import_batch}>
+                {b.import_batch} ({b.customer_count})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {batchFilter !== ALL_BATCHES && (
+          <Button variant="destructive" size="sm" onClick={handleDeleteBatch} disabled={deletingBatch}>
+            {deletingBatch ? "Đang xoá..." : "Xoá cả lô này"}
+          </Button>
+        )}
+      </div>
 
       <Table>
         <TableHeader>

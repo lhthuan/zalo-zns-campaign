@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, Number(searchParams.get("page") ?? "1"));
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize") ?? "20")));
     const search = searchParams.get("search")?.trim();
+    const batch = searchParams.get("batch")?.trim();
 
     let query = supabase
       .from("customers")
@@ -29,6 +30,9 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       query = query.or(`phone.ilike.%${search}%,customer_code.ilike.%${search}%,name.ilike.%${search}%`);
+    }
+    if (batch) {
+      query = query.eq("import_batch", batch);
     }
 
     const { data, error, count } = await query;

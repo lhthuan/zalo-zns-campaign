@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -102,7 +103,11 @@ export default function TemplatesPage() {
               const statusInfo = STATUS_LABEL[t.status] ?? { label: t.status, variant: "outline" as const };
               return (
                 <TableRow key={t.id}>
-                  <TableCell>{t.template_name}</TableCell>
+                  <TableCell>
+                    <Link href={`/templates/${t.id}`} className="hover:underline">
+                      {t.template_name}
+                    </Link>
+                  </TableCell>
                   <TableCell className="font-mono text-xs">{t.template_id}</TableCell>
                   <TableCell>{t.tag ?? "—"}</TableCell>
                   <TableCell>

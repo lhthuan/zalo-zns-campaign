@@ -47,9 +47,20 @@ function ColumnSelect({ field, label, value, headers, onChange }: ColumnSelectPr
   );
 }
 
+function downloadSampleTemplate() {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    ["Mã khách hàng", "Tên", "Số điện thoại", "Zalo UID"],
+    ["KH0001", "Nguyễn Văn A", "0901234567", ""],
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Khách hàng");
+  XLSX.writeFile(workbook, "mau_import_khach_hang.xlsx");
+}
+
 export default function CustomersImportPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
+  const [batchName, setBatchName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({
     customer_code: NONE,
@@ -63,6 +74,7 @@ export default function CustomersImportPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     setFile(f);
+    if (!batchName) setBatchName(f.name.replace(/\.[^./\\]+$/, ""));
 
     const buffer = await f.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array" });
@@ -76,6 +88,10 @@ export default function CustomersImportPage() {
       toast.error("Chọn file trước đã");
       return;
     }
+    if (!batchName.trim()) {
+      toast.error("Đặt tên cho lô import này");
+      return;
+    }
     if (mapping.phone === NONE) {
       toast.error("Phải chọn cột Số điện thoại");
       return;
@@ -84,6 +100,7 @@ export default function CustomersImportPage() {
     setSubmitting(true);
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("batch_name", batchName.trim());
     formData.append(
       "mapping",
       JSON.stringify({
@@ -102,7 +119,7 @@ export default function CustomersImportPage() {
       toast.error(json.error ? JSON.stringify(json.error) : "Import thất bại");
       return;
     }
-    toast.success(`Đã import ${json.imported}/${json.totalRows} dòng`);
+    toast.success(`Đã import ${json.imported}/${json.totalRows} dòng vào lô "${batchName.trim()}"`);
     router.push("/customers");
   }
 
@@ -113,6 +130,18 @@ export default function CustomersImportPage() {
   return (
     <div className="max-w-xl space-y-4">
       <h1 className="text-xl font-semibold">Import khách hàng từ file</h1>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>0. Tải file mẫu (không bắt buộc)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={downloadSampleTemplate}>
+            Tải file mẫu Excel
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>1. Chọn file (.xlsx/.csv)</CardTitle>
@@ -125,9 +154,13 @@ export default function CustomersImportPage() {
       {headers.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>2. Map cột file → dữ liệu khách hàng</CardTitle>
+            <CardTitle>2. Đặt tên lô nhập & map cột</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <Label>Tên lô nhập (dùng để lọc/xoá lại sau này, và chọn khi tạo chiến dịch)</Label>
+              <Input value={batchName} onChange={(e) => setBatchName(e.target.value)} />
+            </div>
             <ColumnSelect
               field="phone"
               label="Số điện thoại (bắt buộc)"

@@ -25,12 +25,24 @@ create table public.customers (
   name text not null,
   phone text not null unique, -- unique để import xlsx có thể upsert theo phone (ON CONFLICT)
   zalo_uid text,
+  import_batch text, -- tên lô import (từ trang import hoặc tên chiến dịch tuỳ biến) để lọc/xoá theo lô
   extra_fields jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 -- phone đã có unique index tự động từ constraint `unique` ở trên
 create index idx_customers_zalo_uid on public.customers (zalo_uid) where zalo_uid is not null;
+create index idx_customers_import_batch on public.customers (import_batch) where import_batch is not null;
+
+create or replace function public.customer_import_batches()
+returns table (import_batch text, customer_count bigint, last_imported_at timestamptz)
+language sql stable as $$
+  select import_batch, count(*)::bigint, max(updated_at)
+  from public.customers
+  where import_batch is not null
+  group by import_batch
+  order by max(updated_at) desc;
+$$;
 
 create table public.zalo_templates (
   id uuid primary key default gen_random_uuid(),
@@ -85,7 +97,7 @@ create index idx_campaigns_status on public.campaigns (status);
 create table public.campaign_recipients (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid not null references public.campaigns(id) on delete cascade,
-  customer_id uuid references public.customers(id),
+  customer_id uuid references public.customers(id) on delete set null,
   phone text not null,
   zalo_uid text,
   template_data jsonb not null,
