@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { isValidVietnamesePhone } from "@/lib/phone";
 import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface Customer {
   id: string;
@@ -82,26 +83,6 @@ interface ColumnDef {
   render: (c: Customer) => React.ReactNode;
 }
 
-const COLUMNS: ColumnDef[] = [
-  {
-    key: "customer_code",
-    label: "Mã KH",
-    sortable: true,
-    filterParam: "filterCode",
-    render: (c) => c.customer_code ?? "—",
-  },
-  { key: "name", label: "Tên", sortable: true, filterParam: "filterName", render: (c) => c.name ?? "—" },
-  { key: "phone", label: "SĐT", sortable: true, filterParam: "filterPhone", render: (c) => c.phone ?? "—" },
-  { key: "zalo_uid", label: "Zalo UID", render: (c) => c.zalo_uid ?? "—" },
-  { key: "import_batch", label: "Lô nhập", render: (c) => c.import_batch ?? "—" },
-  {
-    key: "created_at",
-    label: "Ngày tạo",
-    sortable: true,
-    render: (c) => new Date(c.created_at).toLocaleDateString("vi-VN"),
-  },
-];
-
 function useDebouncedValue<T>(value: T, delayMs = 350): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -112,6 +93,27 @@ function useDebouncedValue<T>(value: T, delayMs = 350): T {
 }
 
 export default function CustomersPage() {
+  const { t } = useTranslation("customers");
+  const { t: tc } = useTranslation("common");
+  const COLUMNS: ColumnDef[] = [
+    {
+      key: "customer_code",
+      label: t("colCode"),
+      sortable: true,
+      filterParam: "filterCode",
+      render: (c) => c.customer_code ?? "—",
+    },
+    { key: "name", label: t("colName"), sortable: true, filterParam: "filterName", render: (c) => c.name ?? "—" },
+    { key: "phone", label: t("colPhone"), sortable: true, filterParam: "filterPhone", render: (c) => c.phone ?? "—" },
+    { key: "zalo_uid", label: t("colZaloUid"), render: (c) => c.zalo_uid ?? "—" },
+    { key: "import_batch", label: t("colImportBatch"), render: (c) => c.import_batch ?? "—" },
+    {
+      key: "created_at",
+      label: t("colCreatedAt"),
+      sortable: true,
+      render: (c) => new Date(c.created_at).toLocaleDateString("vi-VN"),
+    },
+  ];
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -468,28 +470,28 @@ export default function CustomersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Khách hàng</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
         <div className="flex gap-2">
           <Button variant="outline" render={<Link href={exportUrl("xlsx")} />}>
-            Xuất Excel
+            {t("exportExcel")}
           </Button>
           <Button variant="outline" render={<Link href={exportUrl("csv")} />}>
-            Xuất CSV
+            {t("exportCsv")}
           </Button>
           <Button variant="outline" onClick={() => setGroupDialogOpen(true)}>
-            Quản lý nhóm
+            {t("manageGroups")}
           </Button>
           <Button variant="outline" render={<Link href="/customers/import" />}>
-            Import file
+            {t("importFile")}
           </Button>
-          <Button onClick={openNew}>Thêm khách hàng</Button>
+          <Button onClick={openNew}>{t("addCustomer")}</Button>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Select value={batchFilter} onValueChange={(v) => setBatchFilter(v ?? ALL_CUSTOMERS_BATCH)} items={batchItems}>
           <SelectTrigger className="w-64">
-            <SelectValue placeholder="Lọc theo lô import" />
+            <SelectValue placeholder={t("filterByBatch")} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_CUSTOMERS_BATCH}>— {ALL_CUSTOMERS_LABEL} —</SelectItem>
@@ -502,16 +504,16 @@ export default function CustomersPage() {
         </Select>
         {batchFilter !== ALL_CUSTOMERS_BATCH && (
           <Button variant="destructive" size="sm" onClick={handleDeleteBatch} disabled={deletingBatch}>
-            {deletingBatch ? "Đang xoá..." : "Xoá cả lô này"}
+            {deletingBatch ? tc("deleting") : t("deleteBatch")}
           </Button>
         )}
 
         <Select value={groupFilter} onValueChange={(v) => setGroupFilter(v ?? ALL_GROUPS)} items={groupItems}>
           <SelectTrigger className="w-64">
-            <SelectValue placeholder="Lọc theo nhóm" />
+            <SelectValue placeholder={t("filterByGroup")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL_GROUPS}>— Tất cả nhóm —</SelectItem>
+            <SelectItem value={ALL_GROUPS}>— {t("allGroups")} —</SelectItem>
             {groups.map((g) => (
               <SelectItem key={g.group_id} value={g.group_id}>
                 {g.name} ({g.customer_count})
@@ -527,7 +529,7 @@ export default function CustomersPage() {
           <SelectContent>
             {PAGE_SIZE_OPTIONS.map((n) => (
               <SelectItem key={n} value={String(n)}>
-                {n} dòng / trang
+                {n} {t("rowsPerPage")}
               </SelectItem>
             ))}
           </SelectContent>
@@ -536,15 +538,17 @@ export default function CustomersPage() {
 
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
-          <span className="text-sm">{selectedIds.size} khách hàng đã chọn</span>
+          <span className="text-sm">
+            {selectedIds.size} {t("selectedCount")}
+          </span>
           <Button size="sm" onClick={() => setCreateGroupOpen(true)}>
-            Tạo nhóm mới từ đã chọn
+            {t("createGroupFromSelection")}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setAssignGroupOpen(true)}>
-            Thêm/gỡ khỏi nhóm
+            {t("addRemoveGroup")}
           </Button>
           <Button size="sm" variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
-            {bulkDeleting ? "Đang xoá..." : "Xoá tất cả đã chọn"}
+            {bulkDeleting ? tc("deleting") : t("deleteSelected")}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
             Bỏ chọn
@@ -553,8 +557,8 @@ export default function CustomersPage() {
       )}
 
       <p className="text-sm text-muted-foreground">
-        Tổng <strong className="text-foreground">{total}</strong> khách hàng thoả điều kiện
-        {customers.length < total && ` — đã tải ${customers.length}`}
+        {t("totalPrefix")} <strong className="text-foreground">{total}</strong> {t("totalMatching")}
+        {customers.length < total && ` — ${t("loadedSoFar")} ${customers.length}`}
       </p>
 
       <div className="overflow-x-auto rounded-md border">
@@ -578,7 +582,7 @@ export default function CustomersPage() {
                   {sortColumn === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
                 </TableHead>
               ))}
-              <TableHead className="text-right">Hành động</TableHead>
+              <TableHead className="text-right">{t("colActions")}</TableHead>
             </TableRow>
             <TableRow>
               <TableHead />
@@ -587,7 +591,7 @@ export default function CustomersPage() {
                   {col.filterParam ? (
                     <Input
                       className="h-7 text-xs"
-                      placeholder="Lọc..."
+                      placeholder={t("filterPlaceholder")}
                       value={textFilters[col.filterParam] ?? ""}
                       onChange={(e) => setColumnFilter(col.filterParam!, e.target.value)}
                     />
@@ -601,13 +605,13 @@ export default function CustomersPage() {
             {loading ? (
               <TableRow>
                 <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
-                  Đang tải...
+                  {tc("loading")}
                 </TableCell>
               </TableRow>
             ) : customers.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
-                  Không có khách hàng nào
+                  {t("noCustomers")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -621,13 +625,13 @@ export default function CustomersPage() {
                   ))}
                   <TableCell className="text-right space-x-1 whitespace-nowrap">
                     <Button variant="ghost" size="sm" onClick={() => openMessages(c)}>
-                      Tra cứu tin
+                      {t("lookupMessages")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
-                      Sửa
+                      {tc("edit")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)}>
-                      Xoá
+                      {tc("delete")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -640,7 +644,7 @@ export default function CustomersPage() {
       {customers.length < total && (
         <div className="flex justify-center">
           <Button variant="outline" onClick={() => load("more")} disabled={loadingMore}>
-            {loadingMore ? "Đang tải..." : `Xem thêm (${customers.length}/${total})`}
+            {loadingMore ? tc("loading") : `${t("loadMore")} (${customers.length}/${total})`}
           </Button>
         </div>
       )}
@@ -649,36 +653,34 @@ export default function CustomersPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing?.id ? "Sửa khách hàng" : "Thêm khách hàng"}</DialogTitle>
+            <DialogTitle>{editing?.id ? t("editCustomer") : t("addCustomerTitle")}</DialogTitle>
           </DialogHeader>
           {editing && (
             <div className="space-y-3">
               <div className="space-y-1">
-                <Label>Mã KH</Label>
+                <Label>{t("fieldCode")}</Label>
                 <Input
                   value={editing.customer_code ?? ""}
                   onChange={(e) => setEditing({ ...editing, customer_code: e.target.value })}
                 />
               </div>
               <div className="space-y-1">
-                <Label>Tên</Label>
+                <Label>{t("fieldName")}</Label>
                 <Input
                   value={editing.name ?? ""}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                 />
               </div>
               <div className="space-y-1">
-                <Label>Số điện thoại</Label>
+                <Label>{t("fieldPhone")}</Label>
                 <Input
                   value={editing.phone ?? ""}
                   onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Cần ít nhất SĐT hoặc Zalo UID — có thể để trống SĐT nếu đã có UID.
-                </p>
+                <p className="text-xs text-muted-foreground">{t("fieldPhoneHint")}</p>
               </div>
               <div className="space-y-1">
-                <Label>Zalo UID (nếu biết)</Label>
+                <Label>{t("fieldZaloUid")}</Label>
                 <Input
                   value={editing.zalo_uid ?? ""}
                   onChange={(e) => setEditing({ ...editing, zalo_uid: e.target.value })}
@@ -688,9 +690,9 @@ export default function CustomersPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Huỷ
+              {tc("cancel")}
             </Button>
-            <Button onClick={handleSave}>Lưu</Button>
+            <Button onClick={handleSave}>{tc("save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -699,17 +701,19 @@ export default function CustomersPage() {
       <Dialog open={createGroupOpen} onOpenChange={setCreateGroupOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Tạo nhóm mới từ {selectedIds.size} khách hàng đã chọn</DialogTitle>
+            <DialogTitle>
+              {t("createGroupTitle")} {selectedIds.size} {t("customersSuffix")}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
-            <Label>Tên nhóm</Label>
+            <Label>{t("groupName")}</Label>
             <Input value={createGroupName} onChange={(e) => setCreateGroupName(e.target.value)} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateGroupOpen(false)}>
-              Huỷ
+              {tc("cancel")}
             </Button>
-            <Button onClick={handleCreateGroupFromSelection}>Tạo nhóm</Button>
+            <Button onClick={handleCreateGroupFromSelection}>{t("createGroup")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -718,17 +722,19 @@ export default function CustomersPage() {
       <Dialog open={assignGroupOpen} onOpenChange={setAssignGroupOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Thêm/gỡ {selectedIds.size} khách hàng đã chọn khỏi nhóm</DialogTitle>
+            <DialogTitle>
+              {t("assignGroupTitle")} {selectedIds.size} {t("customersSuffix")}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
-            <Label>Chọn nhóm</Label>
+            <Label>{t("chooseGroup")}</Label>
             <Select
               value={assignGroupId}
               onValueChange={(v) => setAssignGroupId(v ?? "")}
               items={Object.fromEntries(groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`]))}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="— Chọn nhóm —" />
+                <SelectValue placeholder={t("chooseGroupPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
                 {groups.map((g) => (
@@ -741,13 +747,13 @@ export default function CustomersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignGroupOpen(false)}>
-              Huỷ
+              {tc("cancel")}
             </Button>
             <Button variant="destructive" onClick={handleRemoveSelectedFromGroup} disabled={assigningGroup}>
-              Gỡ khỏi nhóm
+              {t("removeFromGroup")}
             </Button>
             <Button onClick={handleAddSelectedToGroup} disabled={assigningGroup}>
-              Thêm vào nhóm
+              {t("addToGroup")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -757,31 +763,31 @@ export default function CustomersPage() {
       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Quản lý nhóm khách hàng</DialogTitle>
+            <DialogTitle>{t("manageGroupsTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="flex gap-2">
               <Input
-                placeholder="Tên nhóm mới"
+                placeholder={t("newGroupName")}
                 value={newGroupNameInline}
                 onChange={(e) => setNewGroupNameInline(e.target.value)}
               />
-              <Button onClick={handleCreateGroupInline}>Thêm</Button>
+              <Button onClick={handleCreateGroupInline}>{tc("add")}</Button>
             </div>
             <div className="max-h-80 overflow-y-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Tên nhóm</TableHead>
-                    <TableHead className="text-right">Số KH</TableHead>
-                    <TableHead className="text-right">Hành động</TableHead>
+                    <TableHead>{t("colGroupName")}</TableHead>
+                    <TableHead className="text-right">{t("colCustomerCount")}</TableHead>
+                    <TableHead className="text-right">{t("colActions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {groups.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={3} className="text-center text-muted-foreground">
-                        Chưa có nhóm nào
+                        {t("noGroups")}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -791,10 +797,10 @@ export default function CustomersPage() {
                         <TableCell className="text-right">{g.customer_count}</TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="sm" onClick={() => handleRenameGroup(g.group_id, g.name)}>
-                            Sửa
+                            {tc("edit")}
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => handleDeleteGroup(g.group_id, g.name)}>
-                            Xoá
+                            {tc("delete")}
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -811,12 +817,14 @@ export default function CustomersPage() {
       <Dialog open={messagesFor != null} onOpenChange={(open) => !open && setMessagesFor(null)}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Lịch sử tin nhắn — {messagesFor?.name ?? messagesFor?.phone ?? "Khách hàng"}</DialogTitle>
+            <DialogTitle>
+              {t("messageHistoryTitle")} — {messagesFor?.name ?? messagesFor?.phone ?? t("customerFallback")}
+            </DialogTitle>
           </DialogHeader>
           {messages == null ? (
-            <p className="text-sm text-muted-foreground">Đang tải...</p>
+            <p className="text-sm text-muted-foreground">{tc("loading")}</p>
           ) : messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Chưa gửi tin nào cho khách hàng này.</p>
+            <p className="text-sm text-muted-foreground">{t("noMessages")}</p>
           ) : (
             <div className="max-h-[60vh] space-y-2 overflow-y-auto">
               {messages.map((m) => (
@@ -830,28 +838,28 @@ export default function CustomersPage() {
                         {m.templateLabel} <span className="text-muted-foreground">· {m.sourceLabel}</span>
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {m.at ? new Date(m.at).toLocaleString("vi-VN") : "—"} · gửi qua {m.sendMode}
+                        {m.at ? new Date(m.at).toLocaleString("vi-VN") : "—"} · {t("sentVia")} {m.sendMode}
                       </p>
                     </div>
                     <Badge variant={m.success ? "success" : "destructive"}>
-                      {m.success ? "Thành công" : "Thất bại"}
+                      {m.success ? t("success") : t("failed")}
                     </Badge>
                   </div>
                   {expandedMessageId === m.id && (
                     <div className="mt-2 space-y-1 border-t pt-2 text-xs">
                       <p>
-                        <span className="text-muted-foreground">Tham số:</span>{" "}
+                        <span className="text-muted-foreground">{t("params")}</span>{" "}
                         <span className="font-mono">{JSON.stringify(m.templateData)}</span>
                       </p>
                       {m.zaloMsgId && (
                         <p>
-                          <span className="text-muted-foreground">Zalo Message ID:</span>{" "}
+                          <span className="text-muted-foreground">{t("zaloMsgId")}</span>{" "}
                           <span className="font-mono">{m.zaloMsgId}</span>
                         </p>
                       )}
                       {!m.success && (
                         <p className="text-destructive">
-                          Lỗi {m.errorCode}: {m.errorMessage}
+                          {t("errorLabel")} {m.errorCode}: {m.errorMessage}
                         </p>
                       )}
                     </div>
