@@ -7,7 +7,11 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const patchSchema = z.object({ is_active: z.boolean() });
+const patchSchema = z.object({
+  is_active: z.boolean().optional(),
+  max_total_sends: z.number().int().positive().nullable().optional(),
+  max_daily_sends: z.number().int().positive().nullable().optional(),
+});
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
@@ -15,7 +19,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const { id } = await params;
     const body = patchSchema.parse(await request.json());
     const supabase = createAdminClient();
-    const { error } = await supabase.from("api_keys").update({ is_active: body.is_active }).eq("id", id);
+    const { error } = await supabase.from("api_keys").update(body).eq("id", id);
     if (error) throw error;
     return NextResponse.json({ success: true });
   } catch (err) {

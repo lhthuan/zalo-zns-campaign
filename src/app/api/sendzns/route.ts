@@ -13,6 +13,15 @@ import { isValidVietnamesePhone, toCanonicalZnsPhone } from "@/lib/phone";
 // than the Supabase session cookie the rest of the app uses, since callers
 // here have no browser session.
 
+// "Ngày" tính theo giờ Việt Nam (UTC+7), không phải UTC — trả về mốc UTC ứng
+// với 00:00 giờ VN hôm nay, dùng làm cận dưới khi đếm số tin đã gửi trong ngày.
+function startOfTodayVN(): string {
+  const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+  const vnNow = new Date(Date.now() + VN_OFFSET_MS);
+  const vnMidnightUtc = Date.UTC(vnNow.getUTCFullYear(), vnNow.getUTCMonth(), vnNow.getUTCDate());
+  return new Date(vnMidnightUtc - VN_OFFSET_MS).toISOString();
+}
+
 const bodySchema = z.object({
   phone: z.string().min(1),
   template_id: z.string().min(1),
@@ -39,6 +48,29 @@ export async function POST(request: NextRequest) {
   }
   if (!apiKey) {
     return NextResponse.json({ error: "Invalid or inactive API key" }, { status: 401 });
+  }
+
+  if (apiKey.max_total_sends != null && apiKey.total_sends >= apiKey.max_total_sends) {
+    return NextResponse.json(
+      { error: `Đã vượt giới hạn tổng số tin được gửi (${apiKey.max_total_sends})` },
+      { status: 429 }
+    );
+  }
+  if (apiKey.max_daily_sends != null) {
+    const { count: sentToday, error: countError } = await supabase
+      .from("api_send_log")
+      .select("id", { count: "exact", head: true })
+      .eq("api_key_id", apiKey.id)
+      .gte("created_at", startOfTodayVN());
+    if (countError) {
+      return NextResponse.json({ error: countError.message }, { status: 500 });
+    }
+    if ((sentToday ?? 0) >= apiKey.max_daily_sends) {
+      return NextResponse.json(
+        { error: `Đã vượt giới hạn số tin gửi trong ngày (${apiKey.max_daily_sends})` },
+        { status: 429 }
+      );
+    }
   }
 
   let body: z.infer<typeof bodySchema>;
@@ -148,7 +180,10 @@ export async function POST(request: NextRequest) {
     error_message: errorMessage,
   });
 
-  await supabase.from("api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", apiKey.id);
+  await supabase
+    .from("api_keys")
+    .update({ last_used_at: new Date().toISOString(), total_sends: apiKey.total_sends + 1 })
+    .eq("id", apiKey.id);
 
   return NextResponse.json(
     { success, sendMode, zaloMsgId, errorCode, errorMessage },

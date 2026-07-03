@@ -13,7 +13,6 @@ export type CampaignStatus =
 export type SendMode = "uid" | "phone";
 export type RecipientStatus = "pending" | "sent" | "failed";
 export type CampaignCreationMode = "broadcast" | "custom";
-export type ZnsPricingTag = "TRANSACTION" | "CUSTOMER_CARE" | "PROMOTION" | "OTHER";
 
 export interface Database {
   public: {
@@ -68,6 +67,9 @@ export interface Database {
           status: TemplateStatus;
           tag: string | null;
           template_data_schema: unknown;
+          preview_url: string | null;
+          price_sdt: number | null;
+          price_uid: number | null;
           created_at: string;
           updated_at: string;
           last_synced_at: string | null;
@@ -79,6 +81,9 @@ export interface Database {
           status: TemplateStatus;
           tag?: string | null;
           template_data_schema?: unknown;
+          preview_url?: string | null;
+          price_sdt?: number | null;
+          price_uid?: number | null;
           last_synced_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["zalo_templates"]["Insert"]>;
@@ -132,6 +137,7 @@ export interface Database {
           is_hidden: boolean;
           creation_mode: CampaignCreationMode | null;
           customer_batch: string | null;
+          customer_group_id: string | null;
           fixed_template_data: Record<string, unknown> | null;
           created_by: string | null;
           created_at: string;
@@ -149,6 +155,7 @@ export interface Database {
           is_hidden?: boolean;
           creation_mode?: CampaignCreationMode | null;
           customer_batch?: string | null;
+          customer_group_id?: string | null;
           fixed_template_data?: Record<string, unknown> | null;
           created_by?: string | null;
           updated_at?: string;
@@ -217,20 +224,6 @@ export interface Database {
           },
         ];
       };
-      zns_pricing: {
-        Row: {
-          tag: ZnsPricingTag;
-          price_vnd: number;
-          updated_at: string;
-        };
-        Insert: {
-          tag: ZnsPricingTag;
-          price_vnd?: number;
-          updated_at?: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["zns_pricing"]["Insert"]>;
-        Relationships: [];
-      };
       api_keys: {
         Row: {
           id: string;
@@ -238,6 +231,9 @@ export interface Database {
           key_hash: string;
           key_prefix: string;
           is_active: boolean;
+          max_total_sends: number | null;
+          max_daily_sends: number | null;
+          total_sends: number;
           created_at: string;
           last_used_at: string | null;
         };
@@ -247,6 +243,9 @@ export interface Database {
           key_hash: string;
           key_prefix: string;
           is_active?: boolean;
+          max_total_sends?: number | null;
+          max_daily_sends?: number | null;
+          total_sends?: number;
           last_used_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["api_keys"]["Insert"]>;
@@ -404,6 +403,10 @@ export interface Database {
           name: string;
           customer_count: number;
         }[];
+      };
+      dashboard_overview: {
+        Args: { days_back?: number | null };
+        Returns: unknown;
       };
     };
     Enums: Record<string, never>;

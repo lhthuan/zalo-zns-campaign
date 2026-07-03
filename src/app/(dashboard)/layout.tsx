@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "@/components/logout-button";
 import { OaInfoBadge } from "@/components/oa-info-badge";
+import { NavLinks } from "@/components/nav-links";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -11,29 +11,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <nav className="flex items-center gap-6">
-            <span className="font-semibold">Zalo ZNS Campaign</span>
-            <Link href="/customers" className="text-sm text-muted-foreground hover:text-foreground">
-              Khách hàng
-            </Link>
-            <Link href="/templates" className="text-sm text-muted-foreground hover:text-foreground">
-              Template
-            </Link>
-            <Link href="/campaigns" className="text-sm text-muted-foreground hover:text-foreground">
-              Chiến dịch
-            </Link>
-            <Link href="/send-test" className="text-sm text-muted-foreground hover:text-foreground">
-              Gửi thử
-            </Link>
-            <Link href="/api-logs" className="text-sm text-muted-foreground hover:text-foreground">
-              Nhật ký API
-            </Link>
-            <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
-              Cài đặt
-            </Link>
-          </nav>
+      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-4">
+            <span className="font-heading font-semibold">Zalo ZNS Campaign</span>
+            <NavLinks />
+          </div>
           <div className="flex items-center gap-3">
             <OaInfoBadge />
             <span className="text-sm text-muted-foreground">{user?.email}</span>

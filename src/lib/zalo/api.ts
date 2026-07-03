@@ -111,6 +111,9 @@ interface ZaloTemplateDetailResponse {
     status: TemplateStatus;
     templateTag?: string;
     listParams?: ZaloTemplateParam[];
+    previewUrl?: string;
+    price_sdt?: number | string;
+    price_uid?: number | string;
   };
 }
 
@@ -120,6 +123,9 @@ export interface ZaloTemplateDetail {
   status: TemplateStatus;
   tag: string | null;
   listParams: ZaloTemplateParam[];
+  previewUrl: string | null;
+  priceSdt: number | null;
+  priceUid: number | null;
 }
 
 export async function getTemplateDetail(templateId: string): Promise<ZaloTemplateDetail> {
@@ -140,6 +146,9 @@ export async function getTemplateDetail(templateId: string): Promise<ZaloTemplat
     status: json.data.status,
     tag: json.data.templateTag ?? null,
     listParams: json.data.listParams ?? [],
+    previewUrl: json.data.previewUrl ?? null,
+    priceSdt: json.data.price_sdt != null ? Number(json.data.price_sdt) : null,
+    priceUid: json.data.price_uid != null ? Number(json.data.price_uid) : null,
   };
 }
 

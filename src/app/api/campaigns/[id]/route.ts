@@ -28,7 +28,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
 }
 
 const patchSchema = z.object({
-  is_hidden: z.boolean(),
+  is_hidden: z.boolean().optional(),
+  name: z.string().trim().min(1).optional(),
 });
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
@@ -39,7 +40,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("campaigns")
-      .update({ is_hidden: body.is_hidden, updated_at: new Date().toISOString() })
+      .update({ ...body, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .single();
@@ -51,6 +52,38 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.issues }, { status: 400 });
+    }
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
+
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  try {
+    await requireUser();
+    const { id } = await params;
+    const supabase = createAdminClient();
+
+    const { data: campaign, error: findError } = await supabase
+      .from("campaigns")
+      .select("status")
+      .eq("id", id)
+      .single();
+    if (findError || !campaign) {
+      return NextResponse.json({ error: "Không tìm thấy chiến dịch" }, { status: 404 });
+    }
+    if (campaign.status !== "draft") {
+      return NextResponse.json(
+        { error: "Chỉ có thể xoá chiến dịch còn ở trạng thái nháp" },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    if (error) throw error;
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

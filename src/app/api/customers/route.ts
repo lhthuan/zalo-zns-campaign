@@ -77,6 +77,27 @@ export async function GET(request: NextRequest) {
   }
 }
 
+const bulkDeleteSchema = z.object({ ids: z.array(z.string()).min(1) });
+
+export async function DELETE(request: NextRequest) {
+  try {
+    await requireUser();
+    const body = bulkDeleteSchema.parse(await request.json());
+    const supabase = createAdminClient();
+    const { error } = await supabase.from("customers").delete().in("id", body.ids);
+    if (error) throw error;
+    return NextResponse.json({ success: true, deleted: body.ids.length });
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: err.issues }, { status: 400 });
+    }
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     await requireUser();

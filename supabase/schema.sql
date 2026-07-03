@@ -90,6 +90,9 @@ create table public.zalo_templates (
   status text not null check (status in ('ENABLE','PENDING_REVIEW','REJECT','DISABLE')),
   tag text, -- TRANSACTION / CUSTOMER_CARE / PROMOTION, ảnh hưởng điều kiện gửi qua UID
   template_data_schema jsonb, -- lấy từ field listParams của template/info/v2
+  preview_url text, -- link xem trước template, từ field previewUrl của template/info/v2
+  price_sdt numeric(12,2), -- đơn giá gửi qua SĐT, từ field price_sdt
+  price_uid numeric(12,2), -- đơn giá gửi qua UID, từ field price_uid
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   last_synced_at timestamptz
@@ -128,7 +131,8 @@ create table public.campaigns (
   source_file_name text,
   is_hidden boolean not null default false, -- ẩn khỏi danh sách mặc định, không xoá dữ liệu
   creation_mode text check (creation_mode in ('broadcast','custom')), -- để "Sao chép" prefill lại đúng chế độ
-  customer_batch text, -- chỉ set khi creation_mode='broadcast': lô KH đã chọn lúc tạo (null = tất cả)
+  customer_batch text, -- chỉ set khi creation_mode='broadcast' + chọn theo lô: lô KH đã chọn lúc tạo
+  customer_group_id uuid references public.customer_groups(id) on delete set null, -- hoặc chọn theo nhóm KH (loại trừ lẫn nhau với customer_batch)
   fixed_template_data jsonb, -- chỉ set khi creation_mode='broadcast': tham số cố định đã điền lúc tạo
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
@@ -136,15 +140,6 @@ create table public.campaigns (
 );
 create index idx_campaigns_status on public.campaigns (status);
 create index idx_campaigns_is_hidden on public.campaigns (is_hidden);
-
--- Giá ước tính mỗi tin theo loại template (tag) — Zalo không trả giá theo hợp
--- đồng qua API, nên đây là số admin tự nhập theo hợp đồng thật của OA.
-create table public.zns_pricing (
-  tag text primary key check (tag in ('TRANSACTION','CUSTOMER_CARE','PROMOTION','OTHER')),
-  price_vnd numeric(12,2) not null default 0,
-  updated_at timestamptz not null default now()
-);
-alter table public.zns_pricing enable row level security;
 
 create table public.campaign_recipients (
   id uuid primary key default gen_random_uuid(),
@@ -177,6 +172,9 @@ create table public.api_keys (
   key_hash text not null unique,
   key_prefix text not null,
   is_active boolean not null default true,
+  max_total_sends int, -- null = không giới hạn
+  max_daily_sends int, -- null = không giới hạn; ngày tính theo api_send_log, không cần counter riêng
+  total_sends int not null default 0, -- tăng mỗi lần thử gửi (kể cả thất bại), giống last_used_at
   created_at timestamptz not null default now(),
   last_used_at timestamptz
 );
@@ -222,6 +220,119 @@ create table public.test_send_log (
 );
 create index idx_test_send_log_customer on public.test_send_log (customer_id);
 alter table public.test_send_log enable row level security;
+
+-- Executive overview dashboard: one round trip instead of N+1 queries from
+-- the app. Aggregates across all 3 send sources (campaign, gửi thử, API
+-- ngoài) since Zalo charges for all 3 the same way. Cost is computed from
+-- zalo_templates.price_sdt/price_uid, matched by the Zalo template_id text
+-- (campaign_recipients only has the internal uuid via campaigns.template_id;
+-- api_send_log/test_send_log already store the Zalo template_id text).
+create or replace function public.dashboard_overview(days_back int default null)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  cutoff timestamptz := case when days_back is null then '-infinity'::timestamptz
+                              else now() - (days_back || ' days')::interval end;
+  result jsonb;
+begin
+  with camp_recipients as (
+    select
+      cr.campaign_id,
+      cr.customer_id,
+      cr.status,
+      cr.send_mode,
+      case
+        when cr.status = 'sent' and cr.send_mode = 'phone' then coalesce(zt.price_sdt, 0)
+        when cr.status = 'sent' and cr.send_mode = 'uid' then coalesce(zt.price_uid, 0)
+        else 0
+      end as cost
+    from public.campaign_recipients cr
+    join public.campaigns c on c.id = cr.campaign_id
+    join public.zalo_templates zt on zt.id = c.template_id
+    where coalesce(cr.sent_at, cr.created_at) >= cutoff
+  ),
+  by_campaign as (
+    select
+      c.id,
+      c.name,
+      c.status,
+      count(*) filter (where cr.status = 'sent') as sent,
+      count(*) filter (where cr.status = 'failed') as failed,
+      count(*) filter (where cr.status = 'pending') as pending,
+      coalesce(sum(cr.cost), 0) as cost
+    from public.campaigns c
+    left join camp_recipients cr on cr.campaign_id = c.id
+    group by c.id, c.name, c.status
+  ),
+  by_channel as (
+    select
+      send_mode,
+      count(*) filter (where status = 'sent') as sent,
+      coalesce(sum(cost), 0) as cost
+    from camp_recipients
+    group by send_mode
+  ),
+  api_rows as (
+    select
+      asl.success,
+      case when asl.success then
+        case when asl.send_mode = 'phone' then coalesce(zt.price_sdt, 0) else coalesce(zt.price_uid, 0) end
+      else 0 end as cost
+    from public.api_send_log asl
+    left join public.zalo_templates zt on zt.template_id = asl.template_id
+    where asl.created_at >= cutoff
+  ),
+  test_rows as (
+    select
+      tsl.success,
+      case when tsl.success then
+        case when tsl.send_mode = 'phone' then coalesce(zt.price_sdt, 0) else coalesce(zt.price_uid, 0) end
+      else 0 end as cost
+    from public.test_send_log tsl
+    left join public.zalo_templates zt on zt.template_id = tsl.template_id
+    where tsl.created_at >= cutoff
+  ),
+  top_customers as (
+    select
+      cust.id,
+      cust.name,
+      cust.phone,
+      count(*) as message_count
+    from public.campaign_recipients cr
+    join public.customers cust on cust.id = cr.customer_id
+    where cr.status = 'sent' and coalesce(cr.sent_at, cr.created_at) >= cutoff
+    group by cust.id, cust.name, cust.phone
+    order by count(*) desc
+    limit 10
+  )
+  select jsonb_build_object(
+    'byCampaign',
+      (select coalesce(jsonb_agg(row_to_json(bc.*) order by (bc.sent + bc.failed) desc), '[]'::jsonb)
+       from by_campaign bc),
+    'byChannel',
+      (select coalesce(jsonb_agg(row_to_json(ch.*)), '[]'::jsonb) from by_channel ch),
+    'topCustomers',
+      (select coalesce(jsonb_agg(row_to_json(tc.*)), '[]'::jsonb) from top_customers tc),
+    'totals', jsonb_build_object(
+      'campaignCount', (select count(*) from public.campaigns),
+      'campaignSent', (select coalesce(sum(sent), 0) from by_campaign),
+      'campaignFailed', (select coalesce(sum(failed), 0) from by_campaign),
+      'campaignPending', (select coalesce(sum(pending), 0) from by_campaign),
+      'campaignCost', (select coalesce(sum(cost), 0) from by_campaign),
+      'apiSent', (select count(*) from api_rows where success),
+      'apiFailed', (select count(*) from api_rows where not success),
+      'apiCost', (select coalesce(sum(cost), 0) from api_rows),
+      'testSent', (select count(*) from test_rows where success),
+      'testFailed', (select count(*) from test_rows where not success),
+      'testCost', (select coalesce(sum(cost), 0) from test_rows)
+    )
+  ) into result;
+
+  return result;
+end;
+$$;
 
 -- RLS: khoá hết, app chỉ truy cập qua API route dùng service_role
 alter table public.profiles enable row level security;

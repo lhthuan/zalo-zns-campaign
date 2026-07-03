@@ -85,25 +85,52 @@ export async function POST(request: NextRequest) {
     let recipientsBase: RecipientBase[];
     let sourceFileName: string;
     let customerBatchForRow: string | null = null;
+    let customerGroupIdForRow: string | null = null;
     let fixedTemplateDataForRow: Record<string, string> | null = null;
     let rejectedRows = 0;
 
     if (mode === "broadcast") {
       const customerBatchRaw = formData.get("customer_batch");
+      const customerGroupIdRaw = formData.get("customer_group_id");
       const fixedRaw = formData.get("fixed_template_data");
       if (typeof fixedRaw !== "string") {
         return NextResponse.json({ error: "Missing fixed_template_data" }, { status: 400 });
       }
       const fixedTemplateData = fixedTemplateDataSchema.parse(JSON.parse(fixedRaw));
+      const groupId = typeof customerGroupIdRaw === "string" && customerGroupIdRaw ? customerGroupIdRaw : null;
       const batchLabel =
-        typeof customerBatchRaw === "string" && customerBatchRaw !== ALL_CUSTOMERS_BATCH
+        !groupId && typeof customerBatchRaw === "string" && customerBatchRaw !== ALL_CUSTOMERS_BATCH
           ? customerBatchRaw
           : null;
 
-      let query = supabase.from("customers").select("id, phone, zalo_uid");
-      if (batchLabel) query = query.eq("import_batch", batchLabel);
-      const { data: customers, error } = await query;
-      if (error) throw error;
+      let customers: { id: string; phone: string | null; zalo_uid: string | null }[] | null;
+      let sourceLabel: string;
+      if (groupId) {
+        const { data: group, error: groupError } = await supabase
+          .from("customer_groups")
+          .select("name")
+          .eq("id", groupId)
+          .single();
+        if (groupError || !group) {
+          return NextResponse.json({ error: "Nhóm khách hàng không tồn tại" }, { status: 404 });
+        }
+        const { data: members, error } = await supabase
+          .from("customer_group_members")
+          .select("customers(id, phone, zalo_uid)")
+          .eq("group_id", groupId);
+        if (error) throw error;
+        customers = (members ?? [])
+          .map((m) => m.customers as unknown as { id: string; phone: string | null; zalo_uid: string | null } | null)
+          .filter((c): c is { id: string; phone: string | null; zalo_uid: string | null } => c != null);
+        sourceLabel = `Nhóm: ${group.name}`;
+      } else {
+        let query = supabase.from("customers").select("id, phone, zalo_uid");
+        if (batchLabel) query = query.eq("import_batch", batchLabel);
+        const { data, error } = await query;
+        if (error) throw error;
+        customers = data;
+        sourceLabel = batchLabel ? `Lô: ${batchLabel}` : "Tất cả khách hàng";
+      }
       if (!customers || customers.length === 0) {
         return NextResponse.json({ error: "Danh sách khách hàng trống" }, { status: 400 });
       }
@@ -114,8 +141,9 @@ export async function POST(request: NextRequest) {
         customer_id: c.id,
         template_data: fixedTemplateData,
       }));
-      sourceFileName = batchLabel ? `Lô: ${batchLabel}` : "Tất cả khách hàng";
+      sourceFileName = sourceLabel;
       customerBatchForRow = batchLabel;
+      customerGroupIdForRow = groupId;
       fixedTemplateDataForRow = fixedTemplateData;
     } else {
       const file = formData.get("file");
@@ -250,6 +278,7 @@ export async function POST(request: NextRequest) {
         source_file_name: sourceFileName,
         creation_mode: mode,
         customer_batch: customerBatchForRow,
+        customer_group_id: customerGroupIdForRow,
         fixed_template_data: fixedTemplateDataForRow,
         created_by: user.id,
       })

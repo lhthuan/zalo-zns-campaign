@@ -4,17 +4,11 @@ import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
 
 interface Campaign {
   id: string;
@@ -51,6 +45,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     null
   );
   const [sending, setSending] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
   const load = useCallback(async () => {
     const [campaignRes, previewRes] = await Promise.all([
@@ -90,6 +87,27 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     load();
   }
 
+  async function handleSaveName() {
+    if (!campaign || !nameDraft.trim() || nameDraft.trim() === campaign.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    const res = await fetch(`/api/campaigns/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nameDraft.trim() }),
+    });
+    setSavingName(false);
+    if (!res.ok) {
+      toast.error("Đổi tên thất bại");
+      return;
+    }
+    toast.success("Đã đổi tên chiến dịch");
+    setEditingName(false);
+    load();
+  }
+
   async function handleSend() {
     setSending(true);
     const res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
@@ -110,11 +128,46 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       ? ((campaign.sent_count + campaign.failed_count) / campaign.total_recipients) * 100
       : 0;
 
+  const remaining = Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count);
+
   return (
     <div className="space-y-4">
+      <Button variant="ghost" size="sm" render={<Link href="/campaigns" />}>
+        ← Quay lại danh sách chiến dịch
+      </Button>
+
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">{campaign.name}</h1>
+          {editingName ? (
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-80 text-xl font-semibold"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                autoFocus
+              />
+              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
+                {savingName ? "Đang lưu..." : "Lưu"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
+                Huỷ
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold">{campaign.name}</h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setNameDraft(campaign.name);
+                  setEditingName(true);
+                }}
+              >
+                Sửa tên
+              </Button>
+            </div>
+          )}
           <p className="text-sm text-muted-foreground">
             Template: {campaign.zalo_templates?.template_name ?? "—"}
           </p>
@@ -136,17 +189,34 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </CardHeader>
         <CardContent className="space-y-3">
           <Progress value={progress} />
-          <div className="flex gap-6 text-sm text-muted-foreground">
-            <span>Tổng: {campaign.total_recipients}</span>
-            <span>Đã gửi: {campaign.sent_count}</span>
-            <span>Lỗi: {campaign.failed_count}</span>
-          </div>
-          {preview && (
-            <div className="flex gap-6 text-sm text-muted-foreground">
-              <span>Gửi qua UID: {preview.counts.uid}</span>
-              <span>Gửi qua SĐT: {preview.counts.phone}</span>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Tổng số</p>
+              <p className="text-2xl font-semibold">{campaign.total_recipients}</p>
             </div>
-          )}
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Đã gửi</p>
+              <p className="text-2xl font-semibold">{campaign.sent_count + campaign.failed_count}</p>
+              <p className="text-xs text-muted-foreground">
+                <span className="text-emerald-600">{campaign.sent_count} thành công</span> ·{" "}
+                <span className="text-destructive">{campaign.failed_count} lỗi</span>
+              </p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Còn lại</p>
+              <p className="text-2xl font-semibold">{remaining}</p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Kênh gửi</p>
+              {preview ? (
+                <p className="text-sm">
+                  UID: <strong>{preview.counts.uid}</strong> · SĐT: <strong>{preview.counts.phone}</strong>
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">—</p>
+              )}
+            </div>
+          </div>
           <div className="flex gap-2">
             {campaign.status === "draft" && (
               <Button onClick={handleSend} disabled={sending}>
@@ -162,37 +232,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </CardContent>
       </Card>
 
-      {preview && preview.sample.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Xem trước ({preview.sample.length} dòng đầu)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SĐT</TableHead>
-                  <TableHead>Zalo UID</TableHead>
-                  <TableHead>Chế độ gửi</TableHead>
-                  <TableHead>Dữ liệu template</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.sample.map((row, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{row.phone}</TableCell>
-                    <TableCell>{row.zalo_uid ?? "—"}</TableCell>
-                    <TableCell>{row.send_mode}</TableCell>
-                    <TableCell className="max-w-md truncate text-xs text-muted-foreground">
-                      {JSON.stringify(row.template_data)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Danh sách người nhận</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CampaignRecipientsGrid campaignId={id} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -37,12 +45,22 @@ const STATUS_LABEL: Record<
   completed_with_errors: { label: "Hoàn tất (có lỗi)", variant: "warning" },
   failed: { label: "Thất bại", variant: "destructive" },
 };
+const ALL_STATUS = "__all__";
+const statusItems = {
+  [ALL_STATUS]: "— Tất cả trạng thái —",
+  ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
+};
 
 export default function CampaignsPage() {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [filterName, setFilterName] = useState("");
+  const [filterTemplate, setFilterTemplate] = useState("");
+  const [filterStatus, setFilterStatus] = useState(ALL_STATUS);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,7 +99,34 @@ export default function CampaignsPage() {
     router.push(`/campaigns/new?copyFrom=${id}`);
   }
 
-  const visibleCampaigns = showHidden ? campaigns : campaigns.filter((c) => !c.is_hidden);
+  async function deleteCampaign(c: Campaign, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm(`Xoá chiến dịch nháp "${c.name}"? Không thể hoàn tác.`)) return;
+    setDeletingId(c.id);
+    const res = await fetch(`/api/campaigns/${c.id}`, { method: "DELETE" });
+    const json = await res.json();
+    setDeletingId(null);
+    if (!res.ok) {
+      toast.error(json.error ?? "Xoá thất bại");
+      return;
+    }
+    toast.success("Đã xoá chiến dịch");
+    load();
+  }
+
+  const visibleCampaigns = useMemo(() => {
+    const base = showHidden ? campaigns : campaigns.filter((c) => !c.is_hidden);
+    return base.filter((c) => {
+      if (filterName.trim() && !c.name.toLowerCase().includes(filterName.trim().toLowerCase())) return false;
+      if (
+        filterTemplate.trim() &&
+        !(c.zalo_templates?.template_name ?? "").toLowerCase().includes(filterTemplate.trim().toLowerCase())
+      )
+        return false;
+      if (filterStatus !== ALL_STATUS && c.status !== filterStatus) return false;
+      return true;
+    });
+  }, [campaigns, showHidden, filterName, filterTemplate, filterStatus]);
 
   return (
     <div className="space-y-4">
@@ -109,6 +154,42 @@ export default function CampaignsPage() {
             <TableHead>Đã gửi / Lỗi / Tổng</TableHead>
             <TableHead>Ngày tạo</TableHead>
             <TableHead className="text-right">Hành động</TableHead>
+          </TableRow>
+          <TableRow>
+            <TableHead>
+              <Input
+                className="h-7 text-xs"
+                placeholder="Lọc theo tên..."
+                value={filterName}
+                onChange={(e) => setFilterName(e.target.value)}
+              />
+            </TableHead>
+            <TableHead>
+              <Input
+                className="h-7 text-xs"
+                placeholder="Lọc theo template..."
+                value={filterTemplate}
+                onChange={(e) => setFilterTemplate(e.target.value)}
+              />
+            </TableHead>
+            <TableHead>
+              <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? ALL_STATUS)} items={statusItems}>
+                <SelectTrigger className="h-7 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_STATUS}>— Tất cả trạng thái —</SelectItem>
+                  {Object.entries(STATUS_LABEL).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>
+                      {v.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </TableHead>
+            <TableHead />
+            <TableHead />
+            <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -158,6 +239,16 @@ export default function CampaignsPage() {
                     <Button variant="ghost" size="sm" onClick={(e) => toggleHidden(c, e)}>
                       {c.is_hidden ? "Bỏ ẩn" : "Ẩn"}
                     </Button>
+                    {c.status === "draft" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => deleteCampaign(c, e)}
+                        disabled={deletingId === c.id}
+                      >
+                        {deletingId === c.id ? "Đang xoá..." : "Xoá"}
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               );

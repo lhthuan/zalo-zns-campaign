@@ -34,6 +34,9 @@ interface ApiKeyRow {
   name: string;
   key_prefix: string;
   is_active: boolean;
+  max_total_sends: number | null;
+  max_daily_sends: number | null;
+  total_sends: number;
   created_at: string;
   last_used_at: string | null;
 }
@@ -50,14 +53,6 @@ interface LogEntry {
   level: "info" | "error";
 }
 
-const PRICING_TAGS = ["TRANSACTION", "CUSTOMER_CARE", "PROMOTION", "OTHER"] as const;
-const PRICING_LABEL: Record<(typeof PRICING_TAGS)[number], string> = {
-  TRANSACTION: "Giao dịch (TRANSACTION)",
-  CUSTOMER_CARE: "Chăm sóc KH (CUSTOMER_CARE)",
-  PROMOTION: "Quảng cáo (PROMOTION)",
-  OTHER: "Khác / chưa rõ loại",
-};
-
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [appId, setAppId] = useState("");
@@ -65,12 +60,16 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
-  const [pricing, setPricing] = useState<Record<string, number>>({});
-  const [savingPricing, setSavingPricing] = useState(false);
   const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyMaxTotal, setNewKeyMaxTotal] = useState("");
+  const [newKeyMaxDaily, setNewKeyMaxDaily] = useState("");
   const [creatingKey, setCreatingKey] = useState(false);
   const [newPlaintextKey, setNewPlaintextKey] = useState<string | null>(null);
+  const [editingLimitsFor, setEditingLimitsFor] = useState<ApiKeyRow | null>(null);
+  const [limitMaxTotal, setLimitMaxTotal] = useState("");
+  const [limitMaxDaily, setLimitMaxDaily] = useState("");
+  const [savingLimits, setSavingLimits] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
 
@@ -107,14 +106,6 @@ export default function SettingsPage() {
         }
       })
       .catch(() => toast.error("Không tải được cấu hình"));
-    fetch("/api/settings/zns-pricing")
-      .then((res) => res.json())
-      .then((json) => {
-        const map: Record<string, number> = {};
-        for (const row of json.data ?? []) map[row.tag] = row.price_vnd;
-        setPricing(map);
-      })
-      .catch(() => toast.error("Không tải được cấu hình giá"));
     loadApiKeys();
   }, []);
 
@@ -130,7 +121,11 @@ export default function SettingsPage() {
     const res = await fetch("/api/settings/api-keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newKeyName.trim() }),
+      body: JSON.stringify({
+        name: newKeyName.trim(),
+        max_total_sends: newKeyMaxTotal.trim() ? Number(newKeyMaxTotal) : null,
+        max_daily_sends: newKeyMaxDaily.trim() ? Number(newKeyMaxDaily) : null,
+      }),
     });
     const json = await res.json();
     setCreatingKey(false);
@@ -140,6 +135,35 @@ export default function SettingsPage() {
     }
     setNewPlaintextKey(json.data.plaintext);
     setNewKeyName("");
+    setNewKeyMaxTotal("");
+    setNewKeyMaxDaily("");
+    loadApiKeys();
+  }
+
+  function openEditLimits(key: ApiKeyRow) {
+    setEditingLimitsFor(key);
+    setLimitMaxTotal(key.max_total_sends != null ? String(key.max_total_sends) : "");
+    setLimitMaxDaily(key.max_daily_sends != null ? String(key.max_daily_sends) : "");
+  }
+
+  async function handleSaveLimits() {
+    if (!editingLimitsFor) return;
+    setSavingLimits(true);
+    const res = await fetch(`/api/settings/api-keys/${editingLimitsFor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_total_sends: limitMaxTotal.trim() ? Number(limitMaxTotal) : null,
+        max_daily_sends: limitMaxDaily.trim() ? Number(limitMaxDaily) : null,
+      }),
+    });
+    setSavingLimits(false);
+    if (!res.ok) {
+      toast.error("Cập nhật giới hạn thất bại");
+      return;
+    }
+    toast.success("Đã cập nhật giới hạn");
+    setEditingLimitsFor(null);
     loadApiKeys();
   }
 
@@ -160,24 +184,6 @@ export default function SettingsPage() {
     if (!res.ok) return toast.error("Không xoá được");
     toast.success("Đã xoá key");
     loadApiKeys();
-  }
-
-  async function handleSavePricing() {
-    setSavingPricing(true);
-    const res = await fetch("/api/settings/zns-pricing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        PRICING_TAGS.map((tag) => ({ tag, price_vnd: Number(pricing[tag]) || 0 }))
-      ),
-    });
-    const json = await res.json();
-    setSavingPricing(false);
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Lưu giá thất bại");
-      return;
-    }
-    toast.success("Đã lưu giá ước tính");
   }
 
   async function handleSave() {
@@ -299,50 +305,37 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>4. Giá ước tính mỗi tin ZNS (theo loại template)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Zalo không trả về giá hợp đồng qua API — nhập đúng đơn giá/tin theo hợp đồng thật của bạn
-            với Zalo/đối tác để app hiện chi phí ước tính khi tạo chiến dịch.
-          </p>
-          {PRICING_TAGS.map((tag) => (
-            <div key={tag} className="flex items-center gap-3">
-              <Label className="w-56 shrink-0">{PRICING_LABEL[tag]}</Label>
-              <Input
-                type="number"
-                min={0}
-                value={pricing[tag] ?? 0}
-                onChange={(e) => setPricing((p) => ({ ...p, [tag]: Number(e.target.value) }))}
-              />
-              <span className="text-sm text-muted-foreground shrink-0">đ / tin</span>
-            </div>
-          ))}
-          <Button onClick={handleSavePricing} disabled={savingPricing}>
-            {savingPricing ? "Đang lưu..." : "Lưu giá"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>5. API key cho hệ thống ngoài (POST /api/sendzns)</CardTitle>
+          <CardTitle>4. API key cho hệ thống ngoài (POST /api/sendzns)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
             Cấp 1 key riêng cho từng hệ thống ngoài (website, POS, CRM...) muốn tự gọi gửi ZNS trực
             tiếp, không qua giao diện này. Mỗi key xoá/tắt riêng không ảnh hưởng hệ thống khác.
           </p>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <Input
               placeholder="Tên hệ thống, vd: Website đặt hàng"
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
             />
-            <Button onClick={handleCreateKey} disabled={creatingKey}>
-              {creatingKey ? "Đang tạo..." : "Tạo key mới"}
-            </Button>
+            <Input
+              type="number"
+              min={1}
+              placeholder="Giới hạn tổng số tin (để trống = không giới hạn)"
+              value={newKeyMaxTotal}
+              onChange={(e) => setNewKeyMaxTotal(e.target.value)}
+            />
+            <Input
+              type="number"
+              min={1}
+              placeholder="Giới hạn tin/ngày (để trống = không giới hạn)"
+              value={newKeyMaxDaily}
+              onChange={(e) => setNewKeyMaxDaily(e.target.value)}
+            />
           </div>
+          <Button onClick={handleCreateKey} disabled={creatingKey}>
+            {creatingKey ? "Đang tạo..." : "Tạo key mới"}
+          </Button>
 
           {apiKeys.length > 0 && (
             <Table>
@@ -351,6 +344,7 @@ export default function SettingsPage() {
                   <TableHead>Tên</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead>Trạng thái</TableHead>
+                  <TableHead>Đã gửi / Giới hạn</TableHead>
                   <TableHead>Dùng lần cuối</TableHead>
                   <TableHead className="text-right">Hành động</TableHead>
                 </TableRow>
@@ -365,10 +359,19 @@ export default function SettingsPage() {
                         {k.is_active ? "Đang hoạt động" : "Đã tắt"}
                       </Badge>
                     </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <p>
+                        Tổng: {k.total_sends} / {k.max_total_sends ?? "∞"}
+                      </p>
+                      <p>Giới hạn/ngày: {k.max_daily_sends ?? "∞"}</p>
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {k.last_used_at ? new Date(k.last_used_at).toLocaleString("vi-VN") : "Chưa dùng"}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
+                      <Button variant="ghost" size="sm" onClick={() => openEditLimits(k)}>
+                        Sửa giới hạn
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => handleToggleKey(k)}>
                         {k.is_active ? "Tắt" : "Bật"}
                       </Button>
@@ -386,7 +389,7 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>6. Chuẩn hoá SĐT khách hàng hiện có</CardTitle>
+          <CardTitle>5. Chuẩn hoá SĐT khách hàng hiện có</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
@@ -435,6 +438,42 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editingLimitsFor != null} onOpenChange={(open) => !open && setEditingLimitsFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sửa giới hạn — {editingLimitsFor?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Giới hạn tổng số tin (để trống = không giới hạn)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={limitMaxTotal}
+                onChange={(e) => setLimitMaxTotal(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Giới hạn số tin mỗi ngày (để trống = không giới hạn)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={limitMaxDaily}
+                onChange={(e) => setLimitMaxDaily(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingLimitsFor(null)}>
+              Huỷ
+            </Button>
+            <Button onClick={handleSaveLimits} disabled={savingLimits}>
+              {savingLimits ? "Đang lưu..." : "Lưu"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={newPlaintextKey != null} onOpenChange={(open) => !open && setNewPlaintextKey(null)}>
         <DialogContent>

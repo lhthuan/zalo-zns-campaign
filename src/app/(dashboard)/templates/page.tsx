@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { formatVnd } from "@/lib/format";
 
 interface ZaloTemplateParam {
@@ -30,6 +31,9 @@ interface ZaloTemplate {
   status: string;
   tag: string | null;
   template_data_schema: ZaloTemplateParam[] | null;
+  preview_url: string | null;
+  price_sdt: number | null;
+  price_uid: number | null;
   last_synced_at: string | null;
 }
 
@@ -47,7 +51,7 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [pricing, setPricing] = useState<Record<string, number>>({});
+  const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<ZaloTemplate | null>(null);
 
   const load = useCallback(async () => {
@@ -66,15 +70,15 @@ export default function TemplatesPage() {
     // Standard fetch-on-mount: `load` awaits before calling setState, it isn't synchronous.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    fetch("/api/settings/zns-pricing")
-      .then((res) => res.json())
-      .then((json) => {
-        const map: Record<string, number> = {};
-        for (const row of json.data ?? []) map[row.tag] = row.price_vnd;
-        setPricing(map);
-      })
-      .catch(() => {});
   }, [load]);
+
+  const filtered = templates.filter((t) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (
+      t.template_name.toLowerCase().includes(q) || t.template_id.toLowerCase().includes(q)
+    );
+  });
 
   async function handleSync() {
     setSyncing(true);
@@ -92,11 +96,24 @@ export default function TemplatesPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Template ZNS</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Template ZNS</h1>
+          <p className="text-sm text-muted-foreground">
+            {templates.length} template đã đồng bộ
+            {search.trim() && ` — ${filtered.length} khớp tìm kiếm`}
+          </p>
+        </div>
         <Button onClick={handleSync} disabled={syncing}>
           {syncing ? "Đang đồng bộ..." : "Sync from Zalo"}
         </Button>
       </div>
+
+      <Input
+        placeholder="Tìm theo tên template hoặc Template ID..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="max-w-sm"
+      />
 
       <Table>
         <TableHeader>
@@ -121,8 +138,14 @@ export default function TemplatesPage() {
                 Chưa có template nào — bấm &quot;Sync from Zalo&quot;
               </TableCell>
             </TableRow>
+          ) : filtered.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
+                Không tìm thấy template khớp &quot;{search}&quot;
+              </TableCell>
+            </TableRow>
           ) : (
-            templates.map((t) => {
+            filtered.map((t) => {
               const statusInfo = STATUS_LABEL[t.status] ?? { label: t.status, variant: "outline" as const };
               return (
                 <TableRow key={t.id} className="cursor-pointer" onClick={() => setDetail(t)}>
@@ -153,20 +176,33 @@ export default function TemplatesPage() {
                 </div>
               </DialogHeader>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-3 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Template ID</p>
                     <p className="font-mono">{detail.template_id}</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">Đơn giá ước tính</p>
-                    <p>
-                      {pricing[detail.tag ?? "OTHER"] != null
-                        ? `${formatVnd(pricing[detail.tag ?? "OTHER"] ?? pricing.OTHER ?? 0)} / tin`
-                        : "Chưa cấu hình (xem trang Cài đặt)"}
-                    </p>
+                    <p className="text-muted-foreground">Đơn giá gửi qua SĐT</p>
+                    <p>{detail.price_sdt != null ? `${formatVnd(detail.price_sdt)} / tin` : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Đơn giá gửi qua UID</p>
+                    <p>{detail.price_uid != null ? `${formatVnd(detail.price_uid)} / tin` : "—"}</p>
                   </div>
                 </div>
+
+                {detail.preview_url && (
+                  <div>
+                    <p className="mb-2 text-sm font-medium">Xem trước template</p>
+                    <div className="overflow-hidden rounded-md border" style={{ height: 500 }}>
+                      <iframe
+                        src={detail.preview_url}
+                        title={`Xem trước ${detail.template_name}`}
+                        className="h-full w-full"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <p className="mb-2 text-sm font-medium">
@@ -200,11 +236,12 @@ export default function TemplatesPage() {
                       </TableBody>
                     </Table>
                   )}
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Zalo không cung cấp API trả về nội dung/giao diện thật của template (chỉ trả danh
-                    sách tham số ở trên) — để xem đúng nội dung/giao diện tin nhắn sẽ gửi, vào Zalo
-                    Business Manager (ZBS) → Quản lý mẫu ZNS → tìm template có ID này.
-                  </p>
+                  {!detail.preview_url && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Template này chưa có link xem trước — vào Zalo Business Manager (ZBS) → Quản lý
+                      mẫu ZNS → tìm template có ID này để xem đúng nội dung/giao diện.
+                    </p>
+                  )}
                 </div>
               </div>
             </>

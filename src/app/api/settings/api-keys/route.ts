@@ -10,7 +10,9 @@ export async function GET() {
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("api_keys")
-      .select("id, name, key_prefix, is_active, created_at, last_used_at")
+      .select(
+        "id, name, key_prefix, is_active, max_total_sends, max_daily_sends, total_sends, created_at, last_used_at"
+      )
       .order("created_at", { ascending: false });
     if (error) throw error;
     return NextResponse.json({ data });
@@ -22,7 +24,11 @@ export async function GET() {
   }
 }
 
-const createSchema = z.object({ name: z.string().trim().min(1) });
+const createSchema = z.object({
+  name: z.string().trim().min(1),
+  max_total_sends: z.number().int().positive().nullable().optional(),
+  max_daily_sends: z.number().int().positive().nullable().optional(),
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,8 +39,14 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("api_keys")
-      .insert({ name: body.name, key_hash: hash, key_prefix: prefix })
-      .select("id, name, key_prefix, is_active, created_at")
+      .insert({
+        name: body.name,
+        key_hash: hash,
+        key_prefix: prefix,
+        max_total_sends: body.max_total_sends ?? null,
+        max_daily_sends: body.max_daily_sends ?? null,
+      })
+      .select("id, name, key_prefix, is_active, max_total_sends, max_daily_sends, total_sends, created_at")
       .single();
     if (error) throw error;
 

@@ -23,6 +23,9 @@ export async function POST() {
             status: detail.status,
             tag: detail.tag,
             template_data_schema: detail.listParams,
+            preview_url: detail.previewUrl,
+            price_sdt: detail.priceSdt,
+            price_uid: detail.priceUid,
             last_synced_at: now,
           },
           { onConflict: "template_id" }

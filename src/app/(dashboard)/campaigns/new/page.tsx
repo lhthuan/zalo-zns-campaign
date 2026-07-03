@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
+import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 import { formatVnd } from "@/lib/format";
 
 const NONE = "__none__";
@@ -44,12 +44,20 @@ interface ZaloTemplate {
   status: string;
   tag: string | null;
   template_data_schema: ZaloTemplateParam[] | null;
+  price_sdt: number | null;
+  price_uid: number | null;
 }
 
 interface ImportBatch {
   import_batch: string;
   customer_count: number;
   last_imported_at: string;
+}
+
+interface CustomerGroup {
+  group_id: string;
+  name: string;
+  customer_count: number;
 }
 
 interface ColumnSelectProps {
@@ -83,11 +91,9 @@ function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
 
 function TemplatePreview({
   template,
-  priceVnd,
   recipientCount,
 }: {
   template: ZaloTemplate;
-  priceVnd: number | null;
   recipientCount: number | null;
 }) {
   const params = template.template_data_schema ?? [];
@@ -126,18 +132,43 @@ function TemplatePreview({
             </TableBody>
           </Table>
         )}
-        {priceVnd !== null && (
-          <p className="text-sm text-muted-foreground">
-            Đơn giá ước tính: <strong className="text-foreground">{formatVnd(priceVnd)}</strong> / tin
-            {recipientCount != null && recipientCount > 0 && (
-              <>
-                {" "}
-                × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
-                <strong className="text-foreground">{formatVnd(priceVnd * recipientCount)}</strong>
-              </>
+        {(template.price_sdt != null || template.price_uid != null) && (
+          <div className="space-y-1 text-sm text-muted-foreground">
+            {template.price_sdt != null && (
+              <p>
+                Đơn giá gửi qua SĐT: <strong className="text-foreground">{formatVnd(template.price_sdt)}</strong>{" "}
+                / tin
+                {recipientCount != null && recipientCount > 0 && (
+                  <>
+                    {" "}
+                    × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
+                    <strong className="text-foreground">
+                      {formatVnd(template.price_sdt * recipientCount)}
+                    </strong>
+                  </>
+                )}
+              </p>
             )}
-            <span className="text-xs"> (nhập/sửa ở trang Cài đặt)</span>
-          </p>
+            {template.price_uid != null && (
+              <p>
+                Đơn giá gửi qua UID: <strong className="text-foreground">{formatVnd(template.price_uid)}</strong>{" "}
+                / tin
+                {recipientCount != null && recipientCount > 0 && (
+                  <>
+                    {" "}
+                    × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
+                    <strong className="text-foreground">
+                      {formatVnd(template.price_uid * recipientCount)}
+                    </strong>
+                  </>
+                )}
+              </p>
+            )}
+            <p className="text-xs">
+              Chi phí thực tế phụ thuộc mỗi người nhận gửi qua SĐT hay UID — số trên chỉ là ước tính nếu
+              toàn bộ người nhận cùng 1 chế độ.
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -162,12 +193,14 @@ function NewCampaignForm() {
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"broadcast" | "custom">("broadcast");
   const [submitting, setSubmitting] = useState(false);
-  const [pricing, setPricing] = useState<Record<string, number>>({});
 
   // Broadcast mode
   const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [groups, setGroups] = useState<CustomerGroup[]>([]);
   const [allCustomerCount, setAllCustomerCount] = useState(0);
+  const [broadcastSource, setBroadcastSource] = useState<"all" | "batch" | "group">("all");
   const [customerBatch, setCustomerBatch] = useState(ALL_CUSTOMERS_BATCH);
+  const [customerGroupId, setCustomerGroupId] = useState("");
   const [fixedParams, setFixedParams] = useState<Record<string, string>>({});
 
   // Custom mode
@@ -188,17 +221,13 @@ function NewCampaignForm() {
       .then((res) => res.json())
       .then((json) => setBatches(json.data ?? []))
       .catch(() => toast.error("Không tải được danh sách lô khách hàng"));
+    fetch("/api/customer-groups")
+      .then((res) => res.json())
+      .then((json) => setGroups(json.data ?? []))
+      .catch(() => toast.error("Không tải được danh sách nhóm khách hàng"));
     fetch("/api/customers?page=1&pageSize=1")
       .then((res) => res.json())
       .then((json) => setAllCustomerCount(json.total ?? 0))
-      .catch(() => {});
-    fetch("/api/settings/zns-pricing")
-      .then((res) => res.json())
-      .then((json) => {
-        const map: Record<string, number> = {};
-        for (const row of json.data ?? []) map[row.tag] = row.price_vnd;
-        setPricing(map);
-      })
       .catch(() => {});
   }, []);
 
@@ -213,7 +242,15 @@ function NewCampaignForm() {
         setTemplateId(c.template_id);
         if (c.creation_mode === "broadcast") {
           setMode("broadcast");
-          setCustomerBatch(c.customer_batch ?? ALL_CUSTOMERS_BATCH);
+          if (c.customer_group_id) {
+            setBroadcastSource("group");
+            setCustomerGroupId(c.customer_group_id);
+          } else if (c.customer_batch) {
+            setBroadcastSource("batch");
+            setCustomerBatch(c.customer_batch);
+          } else {
+            setBroadcastSource("all");
+          }
           setFixedParams(c.fixed_template_data ?? {});
         } else {
           setMode("custom");
@@ -225,18 +262,21 @@ function NewCampaignForm() {
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
-  const priceVnd = selectedTemplate ? pricing[selectedTemplate.tag ?? "OTHER"] ?? pricing.OTHER ?? null : null;
   const broadcastCount =
-    customerBatch === ALL_CUSTOMERS_BATCH
+    broadcastSource === "all"
       ? allCustomerCount
-      : batches.find((b) => b.import_batch === customerBatch)?.customer_count ?? 0;
+      : broadcastSource === "batch"
+        ? batches.find((b) => b.import_batch === customerBatch)?.customer_count ?? 0
+        : groups.find((g) => g.group_id === customerGroupId)?.customer_count ?? 0;
   const recipientCount = mode === "broadcast" ? broadcastCount : rowCount;
 
   const templateItems = Object.fromEntries(templates.map((t) => [t.id, t.template_name]));
-  const batchItems = {
-    [ALL_CUSTOMERS_BATCH]: `— ${ALL_CUSTOMERS_LABEL} — (${allCustomerCount})`,
-    ...Object.fromEntries(batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])),
-  };
+  const batchItems = Object.fromEntries(
+    batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])
+  );
+  const groupItems = Object.fromEntries(
+    groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`])
+  );
 
   function downloadDataTemplate() {
     if (!selectedTemplate) return;
@@ -276,7 +316,15 @@ function NewCampaignForm() {
         setSubmitting(false);
         return toast.error(`Chưa điền tham số bắt buộc: ${missingRequired.map((p) => p.name).join(", ")}`);
       }
-      formData.append("customer_batch", customerBatch);
+      if (broadcastSource === "group") {
+        if (!customerGroupId) {
+          setSubmitting(false);
+          return toast.error("Chọn nhóm khách hàng");
+        }
+        formData.append("customer_group_id", customerGroupId);
+      } else if (broadcastSource === "batch") {
+        formData.append("customer_batch", customerBatch);
+      }
       formData.append("fixed_template_data", JSON.stringify(fixedParams));
     } else {
       if (!file) {
@@ -351,7 +399,7 @@ function NewCampaignForm() {
       </Card>
 
       {selectedTemplate && (
-        <TemplatePreview template={selectedTemplate} priceVnd={priceVnd} recipientCount={recipientCount} />
+        <TemplatePreview template={selectedTemplate} recipientCount={recipientCount} />
       )}
 
       {selectedTemplate && (
@@ -373,29 +421,69 @@ function NewCampaignForm() {
                 </p>
                 <div className="space-y-1">
                   <Label>Danh sách khách hàng</Label>
-                  <Select
-                    value={customerBatch}
-                    onValueChange={(v) => setCustomerBatch(v ?? ALL_CUSTOMERS_BATCH)}
-                    items={batchItems}
+                  <Tabs
+                    value={broadcastSource}
+                    onValueChange={(v) =>
+                      setBroadcastSource((v as "all" | "batch" | "group") ?? "all")
+                    }
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL_CUSTOMERS_BATCH}>
-                        — {ALL_CUSTOMERS_LABEL} — ({allCustomerCount})
-                      </SelectItem>
-                      {batches.map((b) => (
-                        <SelectItem key={b.import_batch} value={b.import_batch}>
-                          {b.import_batch} ({b.customer_count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Các lô này được tạo khi bạn import file ở trang Khách hàng, hoặc tự động đặt tên theo
-                    chiến dịch &quot;Gửi tuỳ biến&quot; trước đó.
-                  </p>
+                    <TabsList>
+                      <TabsTrigger value="all">Tất cả khách hàng</TabsTrigger>
+                      <TabsTrigger value="batch">Theo lô upload</TabsTrigger>
+                      <TabsTrigger value="group">Theo nhóm khách hàng</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="all" className="pt-3">
+                      <p className="text-sm text-muted-foreground">
+                        Gửi tới toàn bộ {allCustomerCount.toLocaleString("vi-VN")} khách hàng hiện có.
+                      </p>
+                    </TabsContent>
+
+                    <TabsContent value="batch" className="space-y-1 pt-3">
+                      <Select
+                        value={customerBatch}
+                        onValueChange={(v) => setCustomerBatch(v ?? "")}
+                        items={batchItems}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Chọn lô đã upload" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {batches.map((b) => (
+                            <SelectItem key={b.import_batch} value={b.import_batch}>
+                              {b.import_batch} ({b.customer_count})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Các lô này được tạo khi bạn import file ở trang Khách hàng, hoặc tự động đặt tên
+                        theo chiến dịch &quot;Gửi tuỳ biến&quot; trước đó.
+                      </p>
+                    </TabsContent>
+
+                    <TabsContent value="group" className="space-y-1 pt-3">
+                      <Select
+                        value={customerGroupId}
+                        onValueChange={(v) => setCustomerGroupId(v ?? "")}
+                        items={groupItems}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Chọn nhóm khách hàng" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {groups.map((g) => (
+                            <SelectItem key={g.group_id} value={g.group_id}>
+                              {g.name} ({g.customer_count})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Nhóm khách hàng được quản lý ở trang Khách hàng.
+                      </p>
+                    </TabsContent>
+                  </Tabs>
                 </div>
 
                 {params.length > 0 && (

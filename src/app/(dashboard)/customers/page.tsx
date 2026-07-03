@@ -139,6 +139,11 @@ export default function CustomersPage() {
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [createGroupName, setCreateGroupName] = useState("");
 
+  const [assignGroupOpen, setAssignGroupOpen] = useState(false);
+  const [assignGroupId, setAssignGroupId] = useState("");
+  const [assigningGroup, setAssigningGroup] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   const [messagesFor, setMessagesFor] = useState<Customer | null>(null);
   const [messages, setMessages] = useState<MessageLogEntry[] | null>(null);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
@@ -275,6 +280,63 @@ export default function CustomersPage() {
     setCreateGroupName("");
     setSelectedIds(new Set());
     loadGroups();
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Xoá ${selectedIds.size} khách hàng đang chọn? Không thể hoàn tác.`)) return;
+    setBulkDeleting(true);
+    const res = await fetch("/api/customers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selectedIds] }),
+    });
+    const json = await res.json();
+    setBulkDeleting(false);
+    if (!res.ok) {
+      toast.error(json.error ? JSON.stringify(json.error) : "Xoá thất bại");
+      return;
+    }
+    toast.success(`Đã xoá ${json.deleted} khách hàng`);
+    setSelectedIds(new Set());
+    load("reset");
+  }
+
+  async function handleAddSelectedToGroup() {
+    if (!assignGroupId) return toast.error("Chọn 1 nhóm");
+    setAssigningGroup(true);
+    const res = await fetch(`/api/customer-groups/${assignGroupId}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_ids: [...selectedIds] }),
+    });
+    setAssigningGroup(false);
+    if (!res.ok) {
+      toast.error("Thêm vào nhóm thất bại");
+      return;
+    }
+    toast.success(`Đã thêm ${selectedIds.size} khách hàng vào nhóm`);
+    setAssignGroupOpen(false);
+    loadGroups();
+  }
+
+  async function handleRemoveSelectedFromGroup() {
+    if (!assignGroupId) return toast.error("Chọn 1 nhóm");
+    setAssigningGroup(true);
+    const res = await fetch(`/api/customer-groups/${assignGroupId}/members`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_ids: [...selectedIds] }),
+    });
+    setAssigningGroup(false);
+    if (!res.ok) {
+      toast.error("Gỡ khỏi nhóm thất bại");
+      return;
+    }
+    toast.success(`Đã gỡ ${selectedIds.size} khách hàng khỏi nhóm`);
+    setAssignGroupOpen(false);
+    loadGroups();
+    if (groupFilter === assignGroupId) load("reset");
   }
 
   async function handleCreateGroupInline() {
@@ -473,10 +535,16 @@ export default function CustomersPage() {
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
           <span className="text-sm">{selectedIds.size} khách hàng đã chọn</span>
           <Button size="sm" onClick={() => setCreateGroupOpen(true)}>
             Tạo nhóm mới từ đã chọn
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setAssignGroupOpen(true)}>
+            Thêm/gỡ khỏi nhóm
+          </Button>
+          <Button size="sm" variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+            {bulkDeleting ? "Đang xoá..." : "Xoá tất cả đã chọn"}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
             Bỏ chọn
@@ -642,6 +710,45 @@ export default function CustomersPage() {
               Huỷ
             </Button>
             <Button onClick={handleCreateGroupFromSelection}>Tạo nhóm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/remove selected customers to/from an existing group */}
+      <Dialog open={assignGroupOpen} onOpenChange={setAssignGroupOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Thêm/gỡ {selectedIds.size} khách hàng đã chọn khỏi nhóm</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label>Chọn nhóm</Label>
+            <Select
+              value={assignGroupId}
+              onValueChange={(v) => setAssignGroupId(v ?? "")}
+              items={Object.fromEntries(groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`]))}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="— Chọn nhóm —" />
+              </SelectTrigger>
+              <SelectContent>
+                {groups.map((g) => (
+                  <SelectItem key={g.group_id} value={g.group_id}>
+                    {g.name} ({g.customer_count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignGroupOpen(false)}>
+              Huỷ
+            </Button>
+            <Button variant="destructive" onClick={handleRemoveSelectedFromGroup} disabled={assigningGroup}>
+              Gỡ khỏi nhóm
+            </Button>
+            <Button onClick={handleAddSelectedToGroup} disabled={assigningGroup}>
+              Thêm vào nhóm
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
