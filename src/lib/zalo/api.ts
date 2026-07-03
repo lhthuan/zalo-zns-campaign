@@ -7,6 +7,10 @@ const PHONE_SEND_URL = "https://business.openapi.zalo.me/message/template";
 const UID_SEND_URL = "https://openapi.zalo.me/v3.0/oa/message/template";
 const TEMPLATE_LIST_URL = "https://business.openapi.zalo.me/template/all";
 const TEMPLATE_DETAIL_URL = "https://business.openapi.zalo.me/template/info/v2";
+// Standard Official Account API (not part of the ZNS-specific docs verified
+// earlier) — stable/long-established, but worth double-checking response
+// shape once real credentials are live.
+const OA_INFO_URL = "https://openapi.zalo.me/v2.0/oa/getoa";
 
 async function zaloFetch<T>(url: string, init: RequestInit & { accessToken: string }): Promise<T> {
   const { accessToken, headers, ...rest } = init;
@@ -137,6 +141,35 @@ export async function getTemplateDetail(templateId: string): Promise<ZaloTemplat
     tag: json.data.templateTag ?? null,
     listParams: json.data.listParams ?? [],
   };
+}
+
+interface ZaloOaInfoResponse {
+  error: number;
+  message: string;
+  data?: {
+    oa_id: string;
+    name: string;
+    avatar?: string;
+    description?: string;
+  };
+}
+
+export interface ZaloOaInfo {
+  oaId: string;
+  name: string;
+  avatar: string | null;
+}
+
+export async function getOaInfo(): Promise<ZaloOaInfo> {
+  const accessToken = await getValidAccessToken();
+  const json = await zaloFetch<ZaloOaInfoResponse>(OA_INFO_URL, {
+    accessToken,
+    method: "GET",
+  });
+  if (json.error !== 0 || !json.data) {
+    throw new Error(`Zalo oa/getoa failed: ${json.error} ${json.message}`);
+  }
+  return { oaId: json.data.oa_id, name: json.data.name, avatar: json.data.avatar ?? null };
 }
 
 /**

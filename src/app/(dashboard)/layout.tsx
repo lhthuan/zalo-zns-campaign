@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "@/components/logout-button";
+import { OaInfoBadge } from "@/components/oa-info-badge";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -28,6 +29,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </Link>
           </nav>
           <div className="flex items-center gap-3">
+            <OaInfoBadge />
             <span className="text-sm text-muted-foreground">{user?.email}</span>
             <LogoutButton />
           </div>
