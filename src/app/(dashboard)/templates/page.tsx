@@ -166,35 +166,80 @@ export default function TemplatesPage() {
       </Table>
 
       <Dialog open={detail != null} onOpenChange={(open) => !open && setDetail(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col overflow-hidden p-0">
           {detail && (
             <>
-              <DialogHeader>
+              <DialogHeader className="shrink-0 border-b p-4 pr-12">
                 <div className="flex items-center gap-2">
                   <DialogTitle>{detail.template_name}</DialogTitle>
                   <Badge>{detail.tag ?? "—"}</Badge>
                 </div>
               </DialogHeader>
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Template ID</p>
-                    <p className="font-mono">{detail.template_id}</p>
+
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-y-hidden">
+                <div className="min-w-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <p className="text-muted-foreground">Template ID</p>
+                      <p className="font-mono">{detail.template_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Đơn giá gửi qua SĐT</p>
+                      <p>{detail.price_sdt != null ? `${formatVnd(detail.price_sdt)} / tin` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Đơn giá gửi qua UID</p>
+                      <p>{detail.price_uid != null ? `${formatVnd(detail.price_uid)} / tin` : "—"}</p>
+                    </div>
                   </div>
+
                   <div>
-                    <p className="text-muted-foreground">Đơn giá gửi qua SĐT</p>
-                    <p>{detail.price_sdt != null ? `${formatVnd(detail.price_sdt)} / tin` : "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Đơn giá gửi qua UID</p>
-                    <p>{detail.price_uid != null ? `${formatVnd(detail.price_uid)} / tin` : "—"}</p>
+                    <p className="mb-2 font-medium">
+                      Tham số truyền vào ({(detail.template_data_schema ?? []).length})
+                    </p>
+                    {(detail.template_data_schema ?? []).length === 0 ? (
+                      <p className="text-muted-foreground">Template này không có tham số nào.</p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Tên tham số</TableHead>
+                              <TableHead>Kiểu dữ liệu</TableHead>
+                              <TableHead>Bắt buộc</TableHead>
+                              <TableHead>Độ dài</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(detail.template_data_schema ?? []).map((p) => (
+                              <TableRow key={p.name}>
+                                <TableCell className="font-mono text-xs">{p.name}</TableCell>
+                                <TableCell>{p.type}</TableCell>
+                                <TableCell>{p.require ? "Có" : "Không"}</TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {p.minLength || p.maxLength
+                                    ? `${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`
+                                    : "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                    {!detail.preview_url && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Template này chưa có link xem trước — vào Zalo Business Manager (ZBS) → Quản lý
+                        mẫu ZNS → tìm template có ID này để xem đúng nội dung/giao diện.
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 {detail.preview_url && (
-                  <div>
-                    <p className="mb-2 text-sm font-medium">Xem trước template</p>
-                    <div className="overflow-hidden rounded-md border" style={{ height: 500 }}>
+                  <div className="flex w-full shrink-0 flex-col border-t p-4 lg:w-[340px] lg:border-t-0 lg:border-l">
+                    <p className="mb-2 shrink-0 text-sm font-medium">Xem trước template</p>
+                    <div className="min-h-[600px] flex-1 overflow-hidden rounded-lg border lg:min-h-0">
                       <iframe
                         src={detail.preview_url}
                         title={`Xem trước ${detail.template_name}`}
@@ -203,48 +248,6 @@ export default function TemplatesPage() {
                     </div>
                   </div>
                 )}
-
-                <div>
-                  <p className="mb-2 text-sm font-medium">
-                    Tham số truyền vào ({(detail.template_data_schema ?? []).length})
-                  </p>
-                  {(detail.template_data_schema ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Template này không có tham số nào.</p>
-                  ) : (
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Tên tham số</TableHead>
-                            <TableHead>Kiểu dữ liệu</TableHead>
-                            <TableHead>Bắt buộc</TableHead>
-                            <TableHead>Độ dài</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(detail.template_data_schema ?? []).map((p) => (
-                            <TableRow key={p.name}>
-                              <TableCell className="font-mono text-xs">{p.name}</TableCell>
-                              <TableCell>{p.type}</TableCell>
-                              <TableCell>{p.require ? "Có" : "Không"}</TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {p.minLength || p.maxLength
-                                  ? `${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`
-                                  : "—"}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                  {!detail.preview_url && (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Template này chưa có link xem trước — vào Zalo Business Manager (ZBS) → Quản lý
-                      mẫu ZNS → tìm template có ID này để xem đúng nội dung/giao diện.
-                    </p>
-                  )}
-                </div>
               </div>
             </>
           )}
