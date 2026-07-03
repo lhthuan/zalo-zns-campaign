@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -34,9 +35,11 @@ import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
 interface Customer {
   id: string;
   customer_code: string | null;
-  name: string;
+  name: string | null;
   phone: string | null;
   zalo_uid: string | null;
+  import_batch: string | null;
+  created_at: string;
 }
 
 interface ImportBatch {
@@ -45,35 +48,144 @@ interface ImportBatch {
   last_imported_at: string;
 }
 
-const PAGE_SIZE = 20;
+interface CustomerGroup {
+  group_id: string;
+  name: string;
+  customer_count: number;
+}
+
+interface MessageLogEntry {
+  id: string;
+  source: "campaign" | "test_send" | "api";
+  sourceLabel: string;
+  templateLabel: string;
+  templateData: Record<string, unknown>;
+  sendMode: string;
+  success: boolean;
+  zaloMsgId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  at: string | null;
+}
+
+const PAGE_SIZE_OPTIONS = [100, 200, 300, 400, 500];
+const ALL_GROUPS = "__all__";
+
+// Declarative column list — add an entry here (and to Customer above, if the
+// field is new) to expose another customer field in the table without
+// touching the render logic below.
+interface ColumnDef {
+  key: string;
+  label: string;
+  sortable?: boolean;
+  filterParam?: string;
+  render: (c: Customer) => React.ReactNode;
+}
+
+const COLUMNS: ColumnDef[] = [
+  {
+    key: "customer_code",
+    label: "Mã KH",
+    sortable: true,
+    filterParam: "filterCode",
+    render: (c) => c.customer_code ?? "—",
+  },
+  { key: "name", label: "Tên", sortable: true, filterParam: "filterName", render: (c) => c.name ?? "—" },
+  { key: "phone", label: "SĐT", sortable: true, filterParam: "filterPhone", render: (c) => c.phone ?? "—" },
+  { key: "zalo_uid", label: "Zalo UID", render: (c) => c.zalo_uid ?? "—" },
+  { key: "import_batch", label: "Lô nhập", render: (c) => c.import_batch ?? "—" },
+  {
+    key: "created_at",
+    label: "Ngày tạo",
+    sortable: true,
+    render: (c) => new Date(c.created_at).toLocaleDateString("vi-VN"),
+  },
+];
+
+function useDebouncedValue<T>(value: T, delayMs = 350): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timeout);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [pageSize, setPageSize] = useState(100);
+  const [textFilters, setTextFilters] = useState<Record<string, string>>({});
+  const debouncedTextFilters = useDebouncedValue(textFilters);
   const [batchFilter, setBatchFilter] = useState(ALL_CUSTOMERS_BATCH);
-  const [deletingBatch, setDeletingBatch] = useState(false);
+  const [groupFilter, setGroupFilter] = useState(ALL_GROUPS);
+  const [sortColumn, setSortColumn] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadedPageRef = useRef(1);
+
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [groups, setGroups] = useState<CustomerGroup[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBatch, setDeletingBatch] = useState(false);
+
   const [editing, setEditing] = useState<Customer | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (search) params.set("search", search);
-    if (batchFilter !== ALL_CUSTOMERS_BATCH) params.set("batch", batchFilter);
-    const res = await fetch(`/api/customers?${params.toString()}`);
-    const json = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được danh sách khách hàng");
-      return;
-    }
-    setCustomers(json.data);
-    setTotal(json.total);
-  }, [page, search, batchFilter]);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [newGroupNameInline, setNewGroupNameInline] = useState("");
+
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [createGroupName, setCreateGroupName] = useState("");
+
+  const [messagesFor, setMessagesFor] = useState<Customer | null>(null);
+  const [messages, setMessages] = useState<MessageLogEntry[] | null>(null);
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+
+  const buildParams = useCallback(
+    (page: number) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        sort: sortColumn,
+        dir: sortDir,
+      });
+      for (const [key, value] of Object.entries(debouncedTextFilters)) {
+        if (value) params.set(key, value);
+      }
+      if (batchFilter !== ALL_CUSTOMERS_BATCH) params.set("batch", batchFilter);
+      if (groupFilter !== ALL_GROUPS) params.set("groupId", groupFilter);
+      return params;
+    },
+    [pageSize, sortColumn, sortDir, debouncedTextFilters, batchFilter, groupFilter]
+  );
+
+  const load = useCallback(
+    async (mode: "reset" | "more") => {
+      if (mode === "reset") setLoading(true);
+      else setLoadingMore(true);
+      const page = mode === "reset" ? 1 : loadedPageRef.current + 1;
+      const res = await fetch(`/api/customers?${buildParams(page).toString()}`);
+      const json = await res.json();
+      if (mode === "reset") setLoading(false);
+      else setLoadingMore(false);
+      if (!res.ok) {
+        toast.error(json.error ?? "Không tải được danh sách khách hàng");
+        return;
+      }
+      setTotal(json.total);
+      if (mode === "reset") {
+        setCustomers(json.data);
+        loadedPageRef.current = 1;
+        setSelectedIds(new Set());
+      } else {
+        setCustomers((prev) => [...prev, ...json.data]);
+        loadedPageRef.current = page;
+      }
+    },
+    [buildParams]
+  );
 
   const loadBatches = useCallback(async () => {
     const res = await fetch("/api/customers/import-batches");
@@ -81,16 +193,36 @@ export default function CustomersPage() {
     if (res.ok) setBatches(json.data ?? []);
   }, []);
 
-  useEffect(() => {
-    // Standard fetch-on-mount: `load` awaits before calling setState, it isn't synchronous.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+  const loadGroups = useCallback(async () => {
+    const res = await fetch("/api/customer-groups");
+    const json = await res.json();
+    if (res.ok) setGroups(json.data ?? []);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    load("reset");
+  }, [load]);
+
+  useEffect(() => {
+    // Standard fetch-on-mount: both await before calling setState, neither is synchronous.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadBatches();
-  }, [loadBatches]);
+    loadGroups();
+  }, [loadBatches, loadGroups]);
+
+  function handleSort(column: string) {
+    if (sortColumn === column) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(column);
+      setSortDir("asc");
+    }
+  }
+
+  function setColumnFilter(param: string, value: string) {
+    setTextFilters((prev) => ({ ...prev, [param]: value }));
+  }
 
   async function handleDeleteBatch() {
     if (batchFilter === ALL_CUSTOMERS_BATCH) return;
@@ -107,13 +239,104 @@ export default function CustomersPage() {
     }
     toast.success(`Đã xoá ${json.deleted} khách hàng thuộc lô "${batchFilter}"`);
     setBatchFilter(ALL_CUSTOMERS_BATCH);
-    setPage(1);
-    load();
+    load("reset");
     loadBatches();
   }
 
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllLoaded() {
+    setSelectedIds((prev) =>
+      prev.size === customers.length ? new Set() : new Set(customers.map((c) => c.id))
+    );
+  }
+
+  async function handleCreateGroupFromSelection() {
+    if (!createGroupName.trim()) return toast.error("Đặt tên nhóm");
+    const res = await fetch("/api/customer-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: createGroupName.trim(), customer_ids: [...selectedIds] }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json.error ? JSON.stringify(json.error) : "Tạo nhóm thất bại");
+      return;
+    }
+    toast.success(`Đã tạo nhóm "${createGroupName.trim()}" với ${selectedIds.size} khách hàng`);
+    setCreateGroupOpen(false);
+    setCreateGroupName("");
+    setSelectedIds(new Set());
+    loadGroups();
+  }
+
+  async function handleCreateGroupInline() {
+    if (!newGroupNameInline.trim()) return;
+    const res = await fetch("/api/customer-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newGroupNameInline.trim() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json.error ? JSON.stringify(json.error) : "Tạo nhóm thất bại");
+      return;
+    }
+    setNewGroupNameInline("");
+    loadGroups();
+  }
+
+  async function handleRenameGroup(groupId: string, currentName: string) {
+    const name = prompt("Tên nhóm mới:", currentName);
+    if (!name || !name.trim() || name.trim() === currentName) return;
+    const res = await fetch(`/api/customer-groups/${groupId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    if (!res.ok) return toast.error("Đổi tên thất bại");
+    loadGroups();
+  }
+
+  async function handleDeleteGroup(groupId: string, name: string) {
+    if (!confirm(`Xoá nhóm "${name}"? Khách hàng trong nhóm không bị xoá, chỉ gỡ khỏi nhóm này.`)) return;
+    const res = await fetch(`/api/customer-groups/${groupId}`, { method: "DELETE" });
+    if (!res.ok) return toast.error("Xoá thất bại");
+    toast.success("Đã xoá nhóm");
+    if (groupFilter === groupId) setGroupFilter(ALL_GROUPS);
+    loadGroups();
+  }
+
+  async function openMessages(customer: Customer) {
+    setMessagesFor(customer);
+    setMessages(null);
+    setExpandedMessageId(null);
+    const res = await fetch(`/api/customers/${customer.id}/messages`);
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json.error ?? "Không tải được lịch sử tin nhắn");
+      return;
+    }
+    setMessages(json.data ?? []);
+  }
+
   function openNew() {
-    setEditing({ id: "", customer_code: "", name: "", phone: "", zalo_uid: "" });
+    setEditing({
+      id: "",
+      customer_code: "",
+      name: "",
+      phone: "",
+      zalo_uid: "",
+      import_batch: null,
+      created_at: "",
+    });
     setDialogOpen(true);
   }
 
@@ -137,7 +360,7 @@ export default function CustomersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         customer_code: editing.customer_code || undefined,
-        name: editing.name,
+        name: editing.name || (isNew ? undefined : null),
         phone: editing.phone || (isNew ? undefined : null),
         zalo_uid: editing.zalo_uid || (isNew ? undefined : null),
       }),
@@ -149,7 +372,7 @@ export default function CustomersPage() {
     }
     toast.success(isNew ? "Đã thêm khách hàng" : "Đã cập nhật khách hàng");
     setDialogOpen(false);
-    load();
+    load("reset");
   }
 
   async function handleDelete(id: string) {
@@ -160,16 +383,40 @@ export default function CustomersPage() {
       return;
     }
     toast.success("Đã xoá");
-    load();
+    load("reset");
   }
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  function exportUrl(format: "xlsx" | "csv") {
+    const params = buildParams(1);
+    params.set("format", format);
+    params.delete("page");
+    params.delete("pageSize");
+    return `/api/customers/export?${params.toString()}`;
+  }
+
+  const batchItems = {
+    [ALL_CUSTOMERS_BATCH]: `— ${ALL_CUSTOMERS_LABEL} —`,
+    ...Object.fromEntries(batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])),
+  };
+  const groupItems = {
+    [ALL_GROUPS]: "— Tất cả nhóm —",
+    ...Object.fromEntries(groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`])),
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Khách hàng</h1>
         <div className="flex gap-2">
+          <Button variant="outline" render={<Link href={exportUrl("xlsx")} />}>
+            Xuất Excel
+          </Button>
+          <Button variant="outline" render={<Link href={exportUrl("csv")} />}>
+            Xuất CSV
+          </Button>
+          <Button variant="outline" onClick={() => setGroupDialogOpen(true)}>
+            Quản lý nhóm
+          </Button>
           <Button variant="outline" render={<Link href="/customers/import" />}>
             Import file
           </Button>
@@ -178,26 +425,7 @@ export default function CustomersPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Tìm theo tên, SĐT, mã KH..."
-          value={search}
-          onChange={(e) => {
-            setPage(1);
-            setSearch(e.target.value);
-          }}
-          className="max-w-sm"
-        />
-        <Select
-          value={batchFilter}
-          onValueChange={(v) => {
-            setPage(1);
-            setBatchFilter(v ?? ALL_CUSTOMERS_BATCH);
-          }}
-          items={{
-            [ALL_CUSTOMERS_BATCH]: `— ${ALL_CUSTOMERS_LABEL} —`,
-            ...Object.fromEntries(batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])),
-          }}
-        >
+        <Select value={batchFilter} onValueChange={(v) => setBatchFilter(v ?? ALL_CUSTOMERS_BATCH)} items={batchItems}>
           <SelectTrigger className="w-64">
             <SelectValue placeholder="Lọc theo lô import" />
           </SelectTrigger>
@@ -215,77 +443,141 @@ export default function CustomersPage() {
             {deletingBatch ? "Đang xoá..." : "Xoá cả lô này"}
           </Button>
         )}
+
+        <Select value={groupFilter} onValueChange={(v) => setGroupFilter(v ?? ALL_GROUPS)} items={groupItems}>
+          <SelectTrigger className="w-64">
+            <SelectValue placeholder="Lọc theo nhóm" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_GROUPS}>— Tất cả nhóm —</SelectItem>
+            {groups.map((g) => (
+              <SelectItem key={g.group_id} value={g.group_id}>
+                {g.name} ({g.customer_count})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v) || 100)}>
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n} dòng / trang
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Mã KH</TableHead>
-            <TableHead>Tên</TableHead>
-            <TableHead>SĐT</TableHead>
-            <TableHead>Zalo UID</TableHead>
-            <TableHead className="text-right">Hành động</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Đang tải...
-              </TableCell>
-            </TableRow>
-          ) : customers.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Không có khách hàng nào
-              </TableCell>
-            </TableRow>
-          ) : (
-            customers.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell>{c.customer_code}</TableCell>
-                <TableCell>{c.name}</TableCell>
-                <TableCell>{c.phone ?? "—"}</TableCell>
-                <TableCell>{c.zalo_uid ?? "—"}</TableCell>
-                <TableCell className="text-right space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
-                    Sửa
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)}>
-                    Xoá
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
-
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>Tổng {total} khách hàng</span>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Trước
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+          <span className="text-sm">{selectedIds.size} khách hàng đã chọn</span>
+          <Button size="sm" onClick={() => setCreateGroupOpen(true)}>
+            Tạo nhóm mới từ đã chọn
           </Button>
-          <span>
-            {page}/{totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Sau
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+            Bỏ chọn
           </Button>
         </div>
+      )}
+
+      <p className="text-sm text-muted-foreground">
+        Tổng <strong className="text-foreground">{total}</strong> khách hàng thoả điều kiện
+        {customers.length < total && ` — đã tải ${customers.length}`}
+      </p>
+
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  checked={customers.length > 0 && selectedIds.size === customers.length}
+                  onChange={toggleSelectAllLoaded}
+                />
+              </TableHead>
+              {COLUMNS.map((col) => (
+                <TableHead
+                  key={col.key}
+                  className={col.sortable ? "cursor-pointer select-none" : undefined}
+                  onClick={() => col.sortable && handleSort(col.key)}
+                >
+                  {col.label}
+                  {sortColumn === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
+                </TableHead>
+              ))}
+              <TableHead className="text-right">Hành động</TableHead>
+            </TableRow>
+            <TableRow>
+              <TableHead />
+              {COLUMNS.map((col) => (
+                <TableHead key={col.key}>
+                  {col.filterParam ? (
+                    <Input
+                      className="h-7 text-xs"
+                      placeholder="Lọc..."
+                      value={textFilters[col.filterParam] ?? ""}
+                      onChange={(e) => setColumnFilter(col.filterParam!, e.target.value)}
+                    />
+                  ) : null}
+                </TableHead>
+              ))}
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
+                  Đang tải...
+                </TableCell>
+              </TableRow>
+            ) : customers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
+                  Không có khách hàng nào
+                </TableCell>
+              </TableRow>
+            ) : (
+              customers.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell>
+                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                  </TableCell>
+                  {COLUMNS.map((col) => (
+                    <TableCell key={col.key}>{col.render(c)}</TableCell>
+                  ))}
+                  <TableCell className="text-right space-x-1 whitespace-nowrap">
+                    <Button variant="ghost" size="sm" onClick={() => openMessages(c)}>
+                      Tra cứu tin
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
+                      Sửa
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)}>
+                      Xoá
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
 
+      {customers.length < total && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => load("more")} disabled={loadingMore}>
+            {loadingMore ? "Đang tải..." : `Xem thêm (${customers.length}/${total})`}
+          </Button>
+        </div>
+      )}
+
+      {/* Add/edit customer */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -303,7 +595,7 @@ export default function CustomersPage() {
               <div className="space-y-1">
                 <Label>Tên</Label>
                 <Input
-                  value={editing.name}
+                  value={editing.name ?? ""}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                 />
               </div>
@@ -332,6 +624,135 @@ export default function CustomersPage() {
             </Button>
             <Button onClick={handleSave}>Lưu</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create group from selection */}
+      <Dialog open={createGroupOpen} onOpenChange={setCreateGroupOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tạo nhóm mới từ {selectedIds.size} khách hàng đã chọn</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label>Tên nhóm</Label>
+            <Input value={createGroupName} onChange={(e) => setCreateGroupName(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateGroupOpen(false)}>
+              Huỷ
+            </Button>
+            <Button onClick={handleCreateGroupFromSelection}>Tạo nhóm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group management */}
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Quản lý nhóm khách hàng</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Tên nhóm mới"
+                value={newGroupNameInline}
+                onChange={(e) => setNewGroupNameInline(e.target.value)}
+              />
+              <Button onClick={handleCreateGroupInline}>Thêm</Button>
+            </div>
+            <div className="max-h-80 overflow-y-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tên nhóm</TableHead>
+                    <TableHead className="text-right">Số KH</TableHead>
+                    <TableHead className="text-right">Hành động</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {groups.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        Chưa có nhóm nào
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    groups.map((g) => (
+                      <TableRow key={g.group_id}>
+                        <TableCell>{g.name}</TableCell>
+                        <TableCell className="text-right">{g.customer_count}</TableCell>
+                        <TableCell className="text-right space-x-1">
+                          <Button variant="ghost" size="sm" onClick={() => handleRenameGroup(g.group_id, g.name)}>
+                            Sửa
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteGroup(g.group_id, g.name)}>
+                            Xoá
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Message history lookup */}
+      <Dialog open={messagesFor != null} onOpenChange={(open) => !open && setMessagesFor(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Lịch sử tin nhắn — {messagesFor?.name ?? messagesFor?.phone ?? "Khách hàng"}</DialogTitle>
+          </DialogHeader>
+          {messages == null ? (
+            <p className="text-sm text-muted-foreground">Đang tải...</p>
+          ) : messages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Chưa gửi tin nào cho khách hàng này.</p>
+          ) : (
+            <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+              {messages.map((m) => (
+                <div key={m.id} className="rounded-md border p-3">
+                  <div
+                    className="flex cursor-pointer items-center justify-between"
+                    onClick={() => setExpandedMessageId(expandedMessageId === m.id ? null : m.id)}
+                  >
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">
+                        {m.templateLabel} <span className="text-muted-foreground">· {m.sourceLabel}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {m.at ? new Date(m.at).toLocaleString("vi-VN") : "—"} · gửi qua {m.sendMode}
+                      </p>
+                    </div>
+                    <Badge variant={m.success ? "success" : "destructive"}>
+                      {m.success ? "Thành công" : "Thất bại"}
+                    </Badge>
+                  </div>
+                  {expandedMessageId === m.id && (
+                    <div className="mt-2 space-y-1 border-t pt-2 text-xs">
+                      <p>
+                        <span className="text-muted-foreground">Tham số:</span>{" "}
+                        <span className="font-mono">{JSON.stringify(m.templateData)}</span>
+                      </p>
+                      {m.zaloMsgId && (
+                        <p>
+                          <span className="text-muted-foreground">Zalo Message ID:</span>{" "}
+                          <span className="font-mono">{m.zaloMsgId}</span>
+                        </p>
+                      )}
+                      {!m.success && (
+                        <p className="text-destructive">
+                          Lỗi {m.errorCode}: {m.errorMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

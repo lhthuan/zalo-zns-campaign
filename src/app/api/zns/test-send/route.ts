@@ -16,7 +16,7 @@ const requestSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const body = requestSchema.parse(await request.json());
     const supabase = createAdminClient();
 
@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
     if (templateError || !template) {
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }
+    const tpl = template;
 
     const { data: customers, error: customersError } = await supabase
       .from("customers")
@@ -37,20 +38,52 @@ export async function POST(request: NextRequest) {
     if (!customers || customers.length === 0) {
       return NextResponse.json({ error: "No customers found" }, { status: 404 });
     }
+    const customerList = customers;
 
-    const results = await mapWithConcurrency(customers, 5, async (customer) => {
+    async function logAndReturn(
+      customer: (typeof customerList)[number],
+      sendMode: "uid" | "phone",
+      success: boolean,
+      zaloMsgId: string | null,
+      errorCode: string | null,
+      errorMessage: string | null
+    ) {
+      await supabase.from("test_send_log").insert({
+        customer_id: customer.id,
+        sent_by: user.id,
+        phone: customer.phone,
+        zalo_uid: customer.zalo_uid,
+        template_id: tpl.template_id,
+        template_data: body.template_data,
+        send_mode: sendMode,
+        success,
+        zalo_msg_id: zaloMsgId,
+        error_code: errorCode,
+        error_message: errorMessage,
+      });
+      return {
+        customerId: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        sendMode,
+        success,
+        zaloMsgId,
+        errorCode,
+        errorMessage,
+      };
+    }
+
+    const results = await mapWithConcurrency(customerList, 5, async (customer) => {
       const sendMode: "uid" | "phone" = customer.zalo_uid ? "uid" : "phone";
       if (sendMode === "phone" && !customer.phone) {
-        return {
-          customerId: customer.id,
-          name: customer.name,
-          phone: customer.phone,
+        return logAndReturn(
+          customer,
           sendMode,
-          success: false,
-          zaloMsgId: null,
-          errorCode: null,
-          errorMessage: "Khách hàng không có SĐT lẫn Zalo UID — không gửi được.",
-        };
+          false,
+          null,
+          null,
+          "Khách hàng không có SĐT lẫn Zalo UID — không gửi được."
+        );
       }
       try {
         let result: ZaloUidSendResult | ZaloPhoneSendResult;
@@ -59,14 +92,14 @@ export async function POST(request: NextRequest) {
         if (sendMode === "uid") {
           result = await sendUidTemplate({
             userId: customer.zalo_uid!,
-            templateId: template.template_id,
+            templateId: tpl.template_id,
             templateData: body.template_data,
           });
           msgId = (result as ZaloUidSendResult).data?.message_id;
         } else {
           result = await sendPhoneTemplate({
             phone: customer.phone!,
-            templateId: template.template_id,
+            templateId: tpl.template_id,
             templateData: body.template_data,
             trackingId: crypto.randomBytes(16).toString("hex"),
           });
@@ -81,27 +114,16 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        return {
-          customerId: customer.id,
-          name: customer.name,
-          phone: customer.phone,
+        return logAndReturn(
+          customer,
           sendMode,
           success,
-          zaloMsgId: msgId ?? null,
-          errorCode: success ? null : String(result.error),
-          errorMessage: success ? null : describeZaloError(result.error, result.message),
-        };
+          msgId ?? null,
+          success ? null : String(result.error),
+          success ? null : describeZaloError(result.error, result.message)
+        );
       } catch (err) {
-        return {
-          customerId: customer.id,
-          name: customer.name,
-          phone: customer.phone,
-          sendMode,
-          success: false,
-          zaloMsgId: null,
-          errorCode: null,
-          errorMessage: (err as Error).message,
-        };
+        return logAndReturn(customer, sendMode, false, null, null, (err as Error).message);
       }
     });
 

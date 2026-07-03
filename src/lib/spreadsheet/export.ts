@@ -37,3 +37,26 @@ export function exportReportToCsv(rows: ReportRow[]): string {
   const worksheet = XLSX.utils.aoa_to_sheet(toAoa(rows));
   return XLSX.utils.sheet_to_csv(worksheet);
 }
+
+/** Generic column-driven exporter — add a column here and every future
+ * export (xlsx/csv) picks it up without touching the write logic below. */
+export interface ExportColumn<T> {
+  label: string;
+  value: (row: T) => string | number | null | undefined;
+}
+
+function toGenericAoa<T>(rows: T[], columns: ExportColumn<T>[]): unknown[][] {
+  return [columns.map((c) => c.label), ...rows.map((row) => columns.map((c) => c.value(row) ?? ""))];
+}
+
+export function exportRowsToXlsx<T>(rows: T[], columns: ExportColumn<T>[], sheetName: string): Buffer {
+  const worksheet = XLSX.utils.aoa_to_sheet(toGenericAoa(rows, columns));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+
+export function exportRowsToCsv<T>(rows: T[], columns: ExportColumn<T>[]): string {
+  const worksheet = XLSX.utils.aoa_to_sheet(toGenericAoa(rows, columns));
+  return XLSX.utils.sheet_to_csv(worksheet);
+}

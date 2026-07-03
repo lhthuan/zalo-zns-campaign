@@ -38,6 +38,12 @@ interface ApiKeyRow {
   last_used_at: string | null;
 }
 
+interface BackfillResult {
+  updated: number;
+  conflicts: { canonicalPhone: string; customerIds: string[] }[];
+  unconvertible: { id: string; name: string | null; phone: string }[];
+}
+
 interface LogEntry {
   time: string;
   message: string;
@@ -65,6 +71,27 @@ export default function SettingsPage() {
   const [newKeyName, setNewKeyName] = useState("");
   const [creatingKey, setCreatingKey] = useState(false);
   const [newPlaintextKey, setNewPlaintextKey] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
+
+  async function handleBackfillPhones() {
+    if (
+      !confirm(
+        "Chuẩn hoá lại SĐT của toàn bộ khách hàng hiện có về định dạng 84xxxxxxxxx? Không thể hoàn tác."
+      )
+    )
+      return;
+    setBackfilling(true);
+    const res = await fetch("/api/customers/backfill-phone", { method: "POST" });
+    const json = await res.json();
+    setBackfilling(false);
+    if (!res.ok) {
+      toast.error(json.error ?? "Chuẩn hoá thất bại");
+      return;
+    }
+    setBackfillResult(json);
+    toast.success(`Đã chuẩn hoá ${json.updated} SĐT`);
+  }
 
   function addLog(message: string, level: LogEntry["level"] = "info") {
     setLog((prev) => [{ time: new Date().toLocaleTimeString("vi-VN"), message, level }, ...prev]);
@@ -353,6 +380,58 @@ export default function SettingsPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>6. Chuẩn hoá SĐT khách hàng hiện có</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Chuyển SĐT của khách hàng đã có trong hệ thống (nhập trước khi chuẩn hoá được áp dụng) về
+            đúng định dạng 84xxxxxxxxx mà Zalo yêu cầu. Không tự gộp khách hàng trùng — nếu 2 khách hàng
+            khác nhau đang lưu cùng 1 số thật dưới 2 định dạng khác nhau, sẽ báo ra để bạn tự xử lý.
+          </p>
+          <Button variant="outline" onClick={handleBackfillPhones} disabled={backfilling}>
+            {backfilling ? "Đang chuẩn hoá..." : "Chuẩn hoá SĐT"}
+          </Button>
+
+          {backfillResult && (
+            <div className="space-y-2 text-sm">
+              <p>
+                Đã cập nhật <strong>{backfillResult.updated}</strong> SĐT.
+              </p>
+              {backfillResult.unconvertible.length > 0 && (
+                <div>
+                  <p className="font-medium text-destructive">
+                    {backfillResult.unconvertible.length} SĐT không chuyển đổi được (cần sửa tay):
+                  </p>
+                  <ul className="list-disc pl-5 text-muted-foreground">
+                    {backfillResult.unconvertible.map((c) => (
+                      <li key={c.id}>
+                        {c.name ?? "(chưa có tên)"} — {c.phone}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {backfillResult.conflicts.length > 0 && (
+                <div>
+                  <p className="font-medium text-destructive">
+                    {backfillResult.conflicts.length} số bị trùng giữa 2+ khách hàng (cần gộp/sửa tay):
+                  </p>
+                  <ul className="list-disc pl-5 text-muted-foreground">
+                    {backfillResult.conflicts.map((c) => (
+                      <li key={c.canonicalPhone}>
+                        {c.canonicalPhone} — các khách hàng ID: {c.customerIds.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

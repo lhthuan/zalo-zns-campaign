@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const rows: ReportRow[] = (data ?? []).map((r) => ({
       phone: r.phone,
-      customer_name: (r.customers as unknown as { name: string } | null)?.name ?? null,
+      customer_name: (r.customers as unknown as { name: string | null } | null)?.name ?? null,
       send_mode: r.send_mode,
       status: r.status,
       zalo_msg_id: r.zalo_msg_id,

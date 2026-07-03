@@ -58,10 +58,13 @@ function ColumnSelect({ field, label, value, headers, onChange }: ColumnSelectPr
   );
 }
 
+// Add a header + matching example cell here whenever a new customer field
+// needs its own import column — the mapping UI below already lets any
+// column be assigned to any field, so this only needs to stay a template.
 function downloadSampleTemplate() {
   const worksheet = XLSX.utils.aoa_to_sheet([
-    ["Mã khách hàng", "Tên", "Số điện thoại", "Zalo UID"],
-    ["KH0001", "Nguyễn Văn A", "0901234567", ""],
+    ["Mã khách hàng", "Tên", "Số điện thoại", "Zalo UID", "Nhóm"],
+    ["KH0001", "Nguyễn Văn A", "0901234567", "", "Khách VIP, Hà Nội"],
   ]);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Khách hàng");
@@ -78,6 +81,7 @@ export default function CustomersImportPage() {
     name: NONE,
     phone: NONE,
     zalo_uid: NONE,
+    group: NONE,
   });
   const [preview, setPreview] = useState<ValidatedCustomerRow[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +114,7 @@ export default function CustomersImportPage() {
       name: mapping.name === NONE ? undefined : mapping.name,
       phone: mapping.phone === NONE ? undefined : mapping.phone,
       zalo_uid: mapping.zalo_uid === NONE ? undefined : mapping.zalo_uid,
+      group: mapping.group === NONE ? undefined : mapping.group,
     });
     setPreview(validated);
   }
@@ -202,9 +207,16 @@ export default function CustomersImportPage() {
               headers={headers}
               onChange={(v) => setMappingField("zalo_uid", v)}
             />
+            <ColumnSelect
+              field="group"
+              label="Nhóm (nếu có — nhiều nhóm cách nhau bằng dấu phẩy)"
+              value={mapping.group}
+              headers={headers}
+              onChange={(v) => setMappingField("group", v)}
+            />
             <p className="text-sm text-muted-foreground">
-              Khách hàng cần có ít nhất SĐT hoặc Zalo UID. Các cột còn lại chưa map sẽ được lưu vào
-              trường phụ (extra_fields).
+              Khách hàng cần có ít nhất SĐT hoặc Zalo UID. Nhóm chưa tồn tại sẽ tự được tạo. Các cột còn
+              lại chưa map sẽ được lưu vào trường phụ (extra_fields).
             </p>
             <Button onClick={handlePreview}>Xem trước</Button>
           </CardContent>
@@ -239,7 +251,7 @@ export default function CustomersImportPage() {
                       {invalidRows.map((r) => (
                         <TableRow key={r.rowIndex}>
                           <TableCell>{r.rowIndex + 2}</TableCell>
-                          <TableCell>{r.data.name}</TableCell>
+                          <TableCell>{r.data.name ?? "—"}</TableCell>
                           <TableCell>{r.data.phone ?? "—"}</TableCell>
                           <TableCell>{r.data.zalo_uid ?? "—"}</TableCell>
                           <TableCell>
@@ -260,6 +272,7 @@ export default function CustomersImportPage() {
                     <TableHead>Tên</TableHead>
                     <TableHead>SĐT</TableHead>
                     <TableHead>Zalo UID</TableHead>
+                    <TableHead>Nhóm</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -267,9 +280,10 @@ export default function CustomersImportPage() {
                     .filter((r) => r.valid)
                     .map((r) => (
                       <TableRow key={r.rowIndex}>
-                        <TableCell>{r.data.name}</TableCell>
+                        <TableCell>{r.data.name ?? "—"}</TableCell>
                         <TableCell>{r.data.phone ?? "—"}</TableCell>
                         <TableCell>{r.data.zalo_uid ?? "—"}</TableCell>
+                        <TableCell>{r.data.groups.join(", ") || "—"}</TableCell>
                       </TableRow>
                     ))}
                 </TableBody>

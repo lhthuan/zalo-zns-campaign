@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import type { ImportedRecipientRow } from "@/types/domain";
-import { isValidVietnamesePhone } from "@/lib/phone";
+import { isValidVietnamesePhone, toCanonicalZnsPhone } from "@/lib/phone";
 
 export interface ColumnMapping {
   customer_code?: string;
@@ -40,6 +40,15 @@ function readCell(row: Record<string, unknown>, column: string | undefined): str
   return value == null ? "" : String(value).trim();
 }
 
+/** Reads a phone cell and converts it to Zalo's canonical 84xxxxxxxxx form.
+ * If the cell has content but can't be converted, the raw text is kept so
+ * the caller can surface exactly what was wrong instead of a blank field. */
+function readPhoneCell(row: Record<string, unknown>, column: string | undefined): string | null {
+  const raw = readCell(row, column);
+  if (!raw) return null;
+  return toCanonicalZnsPhone(raw) ?? raw;
+}
+
 export function mapRowsToRecipients(
   rows: Record<string, unknown>[],
   mapping: ColumnMapping
@@ -55,7 +64,7 @@ export function mapRowsToRecipients(
       rowIndex: index,
       customer_code: readCell(row, mapping.customer_code) || undefined,
       name: readCell(row, mapping.name) || undefined,
-      phone: readCell(row, mapping.phone) || undefined,
+      phone: readPhoneCell(row, mapping.phone) ?? undefined,
       zalo_uid: readCell(row, mapping.zalo_uid) || undefined,
       template_data: templateData,
     };
@@ -67,14 +76,22 @@ export interface CustomerImportMapping {
   name?: string;
   phone?: string;
   zalo_uid?: string;
+  group?: string; // cell may contain multiple group names separated by "," or ";"
 }
 
 export interface MappedCustomerRow {
   customer_code: string | null;
-  name: string;
-  phone: string | null;
+  name: string | null;
+  phone: string | null; // canonical 84xxxxxxxxx when valid; raw text when invalid (for error display)
   zalo_uid: string | null;
   extra_fields: Record<string, string>;
+  groups: string[];
+}
+
+function readGroupNames(row: Record<string, unknown>, column: string | undefined): string[] {
+  const raw = readCell(row, column);
+  if (!raw) return [];
+  return [...new Set(raw.split(/[,;]/).map((g) => g.trim()).filter(Boolean))];
 }
 
 export interface ValidatedCustomerRow {
@@ -97,7 +114,7 @@ export function mapAndValidateCustomerRows(
   mapping: CustomerImportMapping
 ): ValidatedCustomerRow[] {
   const mappedColumns = new Set(
-    [mapping.customer_code, mapping.name, mapping.phone, mapping.zalo_uid].filter(
+    [mapping.customer_code, mapping.name, mapping.phone, mapping.zalo_uid, mapping.group].filter(
       (v): v is string => Boolean(v)
     )
   );
@@ -109,16 +126,55 @@ export function mapAndValidateCustomerRows(
       extra_fields[key] = readCell(row, key);
     }
 
-    const phone = readCell(row, mapping.phone) || null;
-    const zalo_uid = readCell(row, mapping.zalo_uid) || null;
     const data: MappedCustomerRow = {
       customer_code: readCell(row, mapping.customer_code) || null,
-      name: readCell(row, mapping.name) || phone || zalo_uid || `Dòng ${rowIndex + 2}`,
-      phone,
-      zalo_uid,
+      name: readCell(row, mapping.name) || null,
+      phone: readPhoneCell(row, mapping.phone),
+      zalo_uid: readCell(row, mapping.zalo_uid) || null,
       extra_fields,
+      groups: readGroupNames(row, mapping.group),
     };
     const reason = validateMappedCustomer(data);
     return { rowIndex, data, valid: reason === null, reason };
   });
+}
+
+export interface CustomerUpsertFields {
+  customer_code?: string;
+  name?: string;
+  phone?: string;
+  zalo_uid?: string;
+  extra_fields?: Record<string, string>;
+}
+
+/** Only includes a key when this row actually has a value for it — an absent
+ * key means "don't touch this column" on conflict (see groupRowsBySignature). */
+export function presentCustomerFields(data: MappedCustomerRow): CustomerUpsertFields {
+  const row: CustomerUpsertFields = {};
+  if (data.customer_code) row.customer_code = data.customer_code;
+  if (data.name) row.name = data.name;
+  if (data.phone) row.phone = data.phone;
+  if (data.zalo_uid) row.zalo_uid = data.zalo_uid;
+  if (Object.keys(data.extra_fields).length > 0) row.extra_fields = data.extra_fields;
+  return row;
+}
+
+/**
+ * PostgREST's upsert derives its ON CONFLICT DO UPDATE SET columns from the
+ * union of keys present across the WHOLE batch passed to a single
+ * .upsert() call — so rows that carry a different set of optional fields
+ * must never share one upsert call, or a row missing e.g. zalo_uid would get
+ * it overwritten with NULL just because another row in the same batch had it.
+ * This groups rows by their exact "which optional fields are present"
+ * signature so each group can be upserted safely on its own.
+ */
+export function groupRowsBySignature<T extends object>(rows: T[], keys: readonly (keyof T)[]): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const signature = keys.filter((k) => row[k] !== undefined).join(",");
+    const list = groups.get(signature) ?? [];
+    list.push(row);
+    groups.set(signature, list);
+  }
+  return [...groups.values()];
 }

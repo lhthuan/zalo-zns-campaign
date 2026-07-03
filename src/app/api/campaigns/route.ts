@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { parseSpreadsheet, mapRowsToRecipients, type ColumnMapping } from "@/lib/spreadsheet/import";
+import {
+  parseSpreadsheet,
+  mapRowsToRecipients,
+  groupRowsBySignature,
+  type ColumnMapping,
+} from "@/lib/spreadsheet/import";
 import { isValidVietnamesePhone } from "@/lib/phone";
 import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 
@@ -140,35 +145,27 @@ export async function POST(request: NextRequest) {
       // Upsert every uploaded recipient into the customers table, tagged with this
       // campaign's name so it becomes a reusable list later (per requirement: after
       // sending a custom campaign, keep the customer data referenced by campaign name).
-      // Split by phone presence (different conflict targets) and, within the
-      // phone group, by UID presence — PostgREST's upsert derives its ON CONFLICT
-      // SET columns from the whole batch's key union, so rows without a UID must
-      // never share a batch with rows that do have one.
+      // Only include a field when this row actually has a value for it — an
+      // absent field means "don't touch this column" on conflict, so re-uploading
+      // a list without e.g. a name column never clobbers a name already on file.
       interface CustomerUpsertRow {
-        name: string;
+        name?: string;
         phone?: string;
         zalo_uid?: string;
         import_batch: string;
         customer_code?: string;
       }
 
-      const withPhoneUid: CustomerUpsertRow[] = [];
-      const withPhoneNoUid: CustomerUpsertRow[] = [];
+      const withPhone: CustomerUpsertRow[] = [];
       const uidOnly: CustomerUpsertRow[] = [];
       for (const r of imported) {
-        const row: CustomerUpsertRow = {
-          name: r.name || r.phone || r.zalo_uid || "Khách hàng",
-          import_batch: name.trim(),
-        };
+        const row: CustomerUpsertRow = { import_batch: name.trim() };
+        if (r.name) row.name = r.name;
         if (r.customer_code) row.customer_code = r.customer_code;
         if (r.phone) {
           row.phone = r.phone;
-          if (r.zalo_uid) {
-            row.zalo_uid = r.zalo_uid;
-            withPhoneUid.push(row);
-          } else {
-            withPhoneNoUid.push(row);
-          }
+          if (r.zalo_uid) row.zalo_uid = r.zalo_uid;
+          withPhone.push(row);
         } else if (r.zalo_uid) {
           row.zalo_uid = r.zalo_uid;
           uidOnly.push(row);
@@ -178,8 +175,15 @@ export async function POST(request: NextRequest) {
       const customerByPhone = new Map<string, { id: string; zalo_uid: string | null }>();
       const customerByUid = new Map<string, { id: string }>();
 
-      for (const group of [withPhoneUid, withPhoneNoUid]) {
-        if (group.length === 0) continue;
+      // PostgREST's upsert derives its ON CONFLICT SET columns from the whole
+      // batch's key union, so rows with a different set of present optional
+      // fields must never share one upsert call.
+      const phoneGroups = groupRowsBySignature(withPhone, [
+        "name",
+        "customer_code",
+        "zalo_uid",
+      ] as const);
+      for (const group of phoneGroups) {
         const { data, error } = await supabase
           .from("customers")
           .upsert(group, { onConflict: "phone", ignoreDuplicates: false })
@@ -204,7 +208,11 @@ export async function POST(request: NextRequest) {
         if (existing) {
           const { error } = await supabase
             .from("customers")
-            .update({ name: row.name, customer_code: row.customer_code, import_batch: row.import_batch })
+            .update({
+              import_batch: row.import_batch,
+              ...(row.name ? { name: row.name } : {}),
+              ...(row.customer_code ? { customer_code: row.customer_code } : {}),
+            })
             .eq("id", existing.id);
           if (error) throw error;
           customerByUid.set(row.zalo_uid as string, { id: existing.id });

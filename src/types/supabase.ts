@@ -39,7 +39,7 @@ export interface Database {
         Row: {
           id: string;
           customer_code: string | null;
-          name: string;
+          name: string | null;
           phone: string | null;
           zalo_uid: string | null;
           import_batch: string | null;
@@ -50,7 +50,7 @@ export interface Database {
         Insert: {
           id?: string;
           customer_code?: string | null;
-          name: string;
+          name?: string | null;
           phone?: string | null;
           zalo_uid?: string | null;
           import_batch?: string | null;
@@ -300,6 +300,92 @@ export interface Database {
           },
         ];
       };
+      test_send_log: {
+        Row: {
+          id: string;
+          customer_id: string | null;
+          sent_by: string | null;
+          phone: string | null;
+          zalo_uid: string | null;
+          template_id: string;
+          template_data: Record<string, unknown>;
+          send_mode: SendMode;
+          success: boolean;
+          zalo_msg_id: string | null;
+          error_code: string | null;
+          error_message: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          customer_id?: string | null;
+          sent_by?: string | null;
+          phone?: string | null;
+          zalo_uid?: string | null;
+          template_id: string;
+          template_data: Record<string, unknown>;
+          send_mode: SendMode;
+          success: boolean;
+          zalo_msg_id?: string | null;
+          error_code?: string | null;
+          error_message?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["test_send_log"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "test_send_log_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_groups: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["customer_groups"]["Insert"]>;
+        Relationships: [];
+      };
+      customer_group_members: {
+        Row: {
+          group_id: string;
+          customer_id: string;
+          added_at: string;
+        };
+        Insert: {
+          group_id: string;
+          customer_id: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["customer_group_members"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "customer_group_members_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "customer_groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_group_members_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -309,6 +395,14 @@ export interface Database {
           import_batch: string;
           customer_count: number;
           last_imported_at: string;
+        }[];
+      };
+      customer_group_counts: {
+        Args: Record<string, never>;
+        Returns: {
+          group_id: string;
+          name: string;
+          customer_count: number;
         }[];
       };
     };

@@ -40,14 +40,14 @@ interface ZaloTemplate {
 
 interface Customer {
   id: string;
-  name: string;
+  name: string | null;
   phone: string | null;
   zalo_uid: string | null;
 }
 
 interface SendResult {
   customerId: string;
-  name: string;
+  name: string | null;
   phone: string | null;
   sendMode: "uid" | "phone";
   success: boolean;
@@ -195,12 +195,12 @@ export default function SendTestPage() {
             <div className="flex flex-wrap gap-2">
               {selected.map((c) => (
                 <Badge key={c.id} variant="secondary" className="gap-1 py-1 pr-1 pl-2 text-sm">
-                  {c.name}
+                  {c.name ?? c.phone ?? c.zalo_uid}
                   <button
                     type="button"
                     onClick={() => removeCustomer(c.id)}
                     className="ml-1 rounded-full px-1 hover:bg-black/10"
-                    aria-label={`Bỏ chọn ${c.name}`}
+                    aria-label={`Bỏ chọn ${c.name ?? c.phone ?? ""}`}
                   >
                     ×
                   </button>
@@ -227,7 +227,7 @@ export default function SendTestPage() {
                         className={already ? "opacity-50" : "cursor-pointer"}
                         onClick={() => addCustomer(c)}
                       >
-                        <TableCell>{c.name}</TableCell>
+                        <TableCell>{c.name ?? "—"}</TableCell>
                         <TableCell>{c.phone ?? "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{c.zalo_uid ?? "—"}</TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">
@@ -266,7 +266,7 @@ export default function SendTestPage() {
               <TableBody>
                 {results.map((r) => (
                   <TableRow key={r.customerId}>
-                    <TableCell>{r.name}</TableCell>
+                    <TableCell>{r.name ?? "—"}</TableCell>
                     <TableCell>{r.phone ?? "—"}</TableCell>
                     <TableCell>{r.sendMode}</TableCell>
                     <TableCell>

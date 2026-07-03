@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { hashApiKey } from "@/lib/apiKey";
 import { sendPhoneTemplate, sendUidTemplate, tryExtractUid } from "@/lib/zalo/api";
 import { describeZaloError } from "@/lib/zalo/errorCodes";
-import { isValidVietnamesePhone, normalizePhone } from "@/lib/phone";
+import { isValidVietnamesePhone, toCanonicalZnsPhone } from "@/lib/phone";
 
 // Public endpoint for external systems (POS, e-commerce backend, CRM...) to
 // trigger a single transactional ZNS send directly, without going through
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!isValidVietnamesePhone(body.phone)) {
     return NextResponse.json({ error: "Số điện thoại không hợp lệ" }, { status: 400 });
   }
-  const phone = normalizePhone(body.phone);
+  const phone = toCanonicalZnsPhone(body.phone)!;
 
   const { data: template, error: templateError } = await supabase
     .from("zalo_templates")
@@ -75,11 +75,11 @@ export async function POST(request: NextRequest) {
   }
 
   // Upsert-with-ignoreDuplicates so a repeat caller never clobbers a real
-  // name/UID we already learned for this phone — it only fills in a
-  // placeholder row the first time this phone is ever seen.
+  // name/UID we already learned for this phone — it only creates a bare
+  // (nameless) row the first time this phone is ever seen.
   const { error: upsertError } = await supabase
     .from("customers")
-    .upsert({ name: phone, phone }, { onConflict: "phone", ignoreDuplicates: true });
+    .upsert({ phone }, { onConflict: "phone", ignoreDuplicates: true });
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
