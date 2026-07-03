@@ -166,7 +166,7 @@ export default function TemplatesPage() {
       </Table>
 
       <Dialog open={detail != null} onOpenChange={(open) => !open && setDetail(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {detail && (
             <>
               <DialogHeader>
@@ -211,30 +211,32 @@ export default function TemplatesPage() {
                   {(detail.template_data_schema ?? []).length === 0 ? (
                     <p className="text-sm text-muted-foreground">Template này không có tham số nào.</p>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Tên tham số</TableHead>
-                          <TableHead>Kiểu dữ liệu</TableHead>
-                          <TableHead>Bắt buộc</TableHead>
-                          <TableHead>Độ dài</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(detail.template_data_schema ?? []).map((p) => (
-                          <TableRow key={p.name}>
-                            <TableCell className="font-mono text-xs">{p.name}</TableCell>
-                            <TableCell>{p.type}</TableCell>
-                            <TableCell>{p.require ? "Có" : "Không"}</TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {p.minLength || p.maxLength
-                                ? `${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`
-                                : "—"}
-                            </TableCell>
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Tên tham số</TableHead>
+                            <TableHead>Kiểu dữ liệu</TableHead>
+                            <TableHead>Bắt buộc</TableHead>
+                            <TableHead>Độ dài</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {(detail.template_data_schema ?? []).map((p) => (
+                            <TableRow key={p.name}>
+                              <TableCell className="font-mono text-xs">{p.name}</TableCell>
+                              <TableCell>{p.type}</TableCell>
+                              <TableCell>{p.require ? "Có" : "Không"}</TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {p.minLength || p.maxLength
+                                  ? `${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`
+                                  : "—"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
                   {!detail.preview_url && (
                     <p className="mt-3 text-xs text-muted-foreground">
