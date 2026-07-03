@@ -23,6 +23,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <Link href="/campaigns" className="text-sm text-muted-foreground hover:text-foreground">
               Chiến dịch
             </Link>
+            <Link href="/send-test" className="text-sm text-muted-foreground hover:text-foreground">
+              Gửi thử
+            </Link>
           </nav>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">{user?.email}</span>
