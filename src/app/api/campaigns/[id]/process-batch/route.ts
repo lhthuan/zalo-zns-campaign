@@ -45,7 +45,7 @@ async function handler(request: Request): Promise<Response> {
           templateId: zaloTemplateId,
           templateData: recipient.template_data as Record<string, string>,
         });
-        await recordResult(recipient.id, recipient.customer_id, result.error, result.message, result.data?.message_id, result);
+        await recordResult(recipient, result.error, result.message, result.data?.message_id, result);
       } else {
         const result = await sendPhoneTemplate({
           phone: recipient.phone,
@@ -53,7 +53,7 @@ async function handler(request: Request): Promise<Response> {
           templateData: recipient.template_data as Record<string, string>,
           trackingId: recipient.tracking_id,
         });
-        await recordResult(recipient.id, recipient.customer_id, result.error, result.message, result.data?.msg_id, result);
+        await recordResult(recipient, result.error, result.message, result.data?.msg_id, result);
       }
     } catch (err) {
       await supabase
@@ -68,8 +68,7 @@ async function handler(request: Request): Promise<Response> {
   });
 
   async function recordResult(
-    recipientId: string,
-    customerId: string | null,
+    recipient: { id: string; customer_id: string | null; zalo_uid: string | null },
     errorCode: number,
     message: string,
     msgId: string | undefined,
@@ -85,12 +84,15 @@ async function handler(request: Request): Promise<Response> {
         error_message: success ? null : describeZaloError(errorCode, message),
         sent_at: new Date().toISOString(),
       })
-      .eq("id", recipientId);
+      .eq("id", recipient.id);
 
-    if (customerId) {
+    // Only trust `data` (and thus any UID in it) on a confirmed-success response,
+    // and skip the write entirely if it wouldn't change anything — matches the
+    // same-shape check in the test-send route.
+    if (success && recipient.customer_id) {
       const uid = tryExtractUid(fullResult);
-      if (uid) {
-        await supabase.from("customers").update({ zalo_uid: uid }).eq("id", customerId);
+      if (uid && uid !== recipient.zalo_uid) {
+        await supabase.from("customers").update({ zalo_uid: uid }).eq("id", recipient.customer_id);
       }
     }
   }
