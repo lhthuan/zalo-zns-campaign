@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login"];
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   let user = null;
@@ -36,7 +36,7 @@ export async function proxy(request: NextRequest) {
   } catch (err) {
     // Never let an auth-check failure take down every page (login included) with a hard crash;
     // fall back to "not logged in" and surface the real cause in Vercel's function logs.
-    console.error("proxy: failed to resolve Supabase session", err);
+    console.error("middleware: failed to resolve Supabase session", err);
   }
 
   const isPublicPath = PUBLIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path));
