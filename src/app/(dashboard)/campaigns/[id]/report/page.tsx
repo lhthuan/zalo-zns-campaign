@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface ReportSummary {
   sentUid: number;
@@ -16,6 +17,7 @@ interface ReportSummary {
 
 export default function CampaignReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { t } = useTranslation("campaignReport");
   const [summary, setSummary] = useState<ReportSummary | null>(null);
 
   useEffect(() => {
@@ -24,32 +26,32 @@ export default function CampaignReportPage({ params }: { params: Promise<{ id: s
     fetch(`/api/campaigns/${id}/report?page=1`)
       .then((res) => res.json())
       .then((json) => setSummary(json.summary))
-      .catch(() => toast.error("Không tải được báo cáo"));
-  }, [id]);
+      .catch(() => toast.error(t("loadFailed")));
+  }, [id, t]);
 
   const total = summary ? summary.sentUid + summary.sentPhone + summary.failed + summary.pending : 0;
 
   return (
     <div className="space-y-4">
       <Button variant="ghost" size="sm" render={<Link href={`/campaigns/${id}`} />}>
-        ← Quay lại chiến dịch
+        ← {t("backToCampaign")}
       </Button>
 
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Báo cáo chiến dịch</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
       {summary && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">Tổng số</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t("total")}</CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">{total}</CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">Thành công (UID / SĐT)</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t("successUidPhone")}</CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold text-emerald-600">
               {summary.sentUid + summary.sentPhone}
@@ -60,13 +62,13 @@ export default function CampaignReportPage({ params }: { params: Promise<{ id: s
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">Thất bại</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t("failed")}</CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold text-destructive">{summary.failed}</CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">Còn lại</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t("remaining")}</CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">{summary.pending}</CardContent>
           </Card>
@@ -75,7 +77,7 @@ export default function CampaignReportPage({ params }: { params: Promise<{ id: s
 
       <Card>
         <CardHeader>
-          <CardTitle>Chi tiết người nhận</CardTitle>
+          <CardTitle>{t("detailTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <CampaignRecipientsGrid campaignId={id} />

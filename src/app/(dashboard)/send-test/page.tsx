@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface ZaloTemplateParam {
   name: string;
@@ -57,6 +58,7 @@ interface SendResult {
 }
 
 export default function SendTestPage() {
+  const { t } = useTranslation("sendTest");
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [search, setSearch] = useState("");
@@ -69,7 +71,7 @@ export default function SendTestPage() {
   useEffect(() => {
     fetch("/api/templates")
       .then((res) => res.json())
-      .then((json) => setTemplates((json.data ?? []).filter((t: ZaloTemplate) => t.status === "ENABLE")))
+      .then((json) => setTemplates((json.data ?? []).filter((tpl: ZaloTemplate) => tpl.status === "ENABLE")))
       .catch(() => toast.error("Không tải được danh sách template"));
   }, []);
 
@@ -88,9 +90,9 @@ export default function SendTestPage() {
     return () => clearTimeout(timeout);
   }, [search]);
 
-  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const selectedTemplate = templates.find((tpl) => tpl.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
-  const templateItems = Object.fromEntries(templates.map((t) => [t.id, t.template_name]));
+  const templateItems = Object.fromEntries(templates.map((tpl) => [tpl.id, tpl.template_name]));
   const selectedIds = new Set(selected.map((c) => c.id));
 
   function addCustomer(c: Customer) {
@@ -137,26 +139,23 @@ export default function SendTestPage() {
   return (
     <div className="max-w-3xl space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Gửi thử ZNS</h1>
-        <p className="text-sm text-muted-foreground">
-          Gửi 1 tin ZNS ngay lập tức tới một vài khách hàng đã chọn, dùng để test template và hàm gửi
-          tin (không tạo chiến dịch, không qua hàng đợi).
-        </p>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Chọn template</CardTitle>
+          <CardTitle>{t("step1")}</CardTitle>
         </CardHeader>
         <CardContent>
           <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")} items={templateItems}>
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Chọn template" />
+              <SelectValue placeholder={t("chooseTemplate")} />
             </SelectTrigger>
             <SelectContent>
-              {templates.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.template_name}
+              {templates.map((tpl) => (
+                <SelectItem key={tpl.id} value={tpl.id}>
+                  {tpl.template_name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -164,14 +163,14 @@ export default function SendTestPage() {
 
           {params.length > 0 && (
             <div className="mt-4 space-y-3 border-t pt-3">
-              <p className="text-sm font-medium">Tham số template</p>
+              <p className="text-sm font-medium">{t("templateParams")}</p>
               {params.map((p) => (
                 <div key={p.name} className="space-y-1">
                   <Label>
                     {p.name} {p.require && <span className="text-destructive">*</span>}
                     <span className="ml-2 font-normal text-xs text-muted-foreground">
                       {p.type}
-                      {(p.minLength || p.maxLength) && ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`}
+                      {(p.minLength || p.maxLength) && ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"}`}
                     </span>
                   </Label>
                   <Input
@@ -188,7 +187,9 @@ export default function SendTestPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>2. Chọn khách hàng ({selected.length} đã chọn)</CardTitle>
+          <CardTitle>
+            {t("step2")} ({selected.length} {t("selected")})
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {selected.length > 0 && (
@@ -200,7 +201,7 @@ export default function SendTestPage() {
                     type="button"
                     onClick={() => removeCustomer(c.id)}
                     className="ml-1 rounded-full px-1 hover:bg-black/10"
-                    aria-label={`Bỏ chọn ${c.name ?? c.phone ?? ""}`}
+                    aria-label={`${t("deselect")} ${c.name ?? c.phone ?? ""}`}
                   >
                     ×
                   </button>
@@ -210,7 +211,7 @@ export default function SendTestPage() {
           )}
 
           <Input
-            placeholder="Tìm theo tên, SĐT, mã KH... rồi bấm để thêm vào danh sách gửi"
+            placeholder={t("searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -231,7 +232,7 @@ export default function SendTestPage() {
                         <TableCell>{c.phone ?? "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{c.zalo_uid ?? "—"}</TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">
-                          {already ? "Đã chọn" : "+ Thêm"}
+                          {already ? t("already") : t("add")}
                         </TableCell>
                       </TableRow>
                     );
@@ -244,23 +245,23 @@ export default function SendTestPage() {
       </Card>
 
       <Button onClick={handleSend} disabled={sending}>
-        {sending ? "Đang gửi..." : "Gửi thử"}
+        {sending ? t("sending") : t("send")}
       </Button>
 
       {results.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Kết quả</CardTitle>
+            <CardTitle>{t("resultTitle")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tên</TableHead>
-                  <TableHead>SĐT</TableHead>
-                  <TableHead>Chế độ</TableHead>
-                  <TableHead>Kết quả</TableHead>
-                  <TableHead>Chi tiết</TableHead>
+                  <TableHead>{t("colName")}</TableHead>
+                  <TableHead>{t("colPhone")}</TableHead>
+                  <TableHead>{t("colMode")}</TableHead>
+                  <TableHead>{t("colResult")}</TableHead>
+                  <TableHead>{t("colDetail")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -271,7 +272,7 @@ export default function SendTestPage() {
                     <TableCell>{r.sendMode}</TableCell>
                     <TableCell>
                       <Badge variant={r.success ? "success" : "destructive"}>
-                        {r.success ? "Thành công" : "Thất bại"}
+                        {r.success ? t("success") : t("failed")}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">

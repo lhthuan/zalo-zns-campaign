@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface RecipientRow {
   phone: string | null;
@@ -38,13 +39,13 @@ const PAGE_SIZE_OPTIONS = [50, 100, 200, 500];
 const ALL_STATUS = "__all__";
 const ALL_MODE = "__all__";
 
-const STATUS_LABEL: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "outline" }> = {
-  pending: { label: "Chờ gửi", variant: "outline" },
-  sent: { label: "Thành công", variant: "success" },
-  failed: { label: "Thất bại", variant: "destructive" },
-};
-
 export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
+  const { t } = useTranslation("recipientsGrid");
+  const STATUS_LABEL: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "outline" }> = {
+    pending: { label: t("statusPending"), variant: "outline" },
+    sent: { label: t("statusSent"), variant: "success" },
+    failed: { label: t("statusFailed"), variant: "destructive" },
+  };
   const [rows, setRows] = useState<RecipientRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -119,14 +120,14 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Tổng <strong className="text-foreground">{total}</strong> người nhận thoả điều kiện
+          {t("totalPrefix")} <strong className="text-foreground">{total}</strong> {t("totalMatching")}
         </p>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" render={<a href={exportUrl("xlsx")} />}>
-            Xuất Excel
+            {t("exportExcel")}
           </Button>
           <Button variant="outline" size="sm" render={<a href={exportUrl("csv")} />}>
-            Xuất CSV
+            {t("exportCsv")}
           </Button>
         </div>
       </div>
@@ -139,7 +140,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
           <SelectContent>
             {PAGE_SIZE_OPTIONS.map((n) => (
               <SelectItem key={n} value={String(n)}>
-                {n} dòng / trang
+                {n} {t("rowsPerPage")}
               </SelectItem>
             ))}
           </SelectContent>
@@ -151,25 +152,29 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
           <TableHeader>
             <TableRow>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("phone")}>
-                SĐT{sortColumn === "phone" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {t("colPhone")}
+                {sortColumn === "phone" && (sortDir === "asc" ? " ▲" : " ▼")}
               </TableHead>
-              <TableHead>Khách hàng</TableHead>
+              <TableHead>{t("colCustomer")}</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("send_mode")}>
-                Chế độ{sortColumn === "send_mode" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {t("colMode")}
+                {sortColumn === "send_mode" && (sortDir === "asc" ? " ▲" : " ▼")}
               </TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("status")}>
-                Trạng thái{sortColumn === "status" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {t("colStatus")}
+                {sortColumn === "status" && (sortDir === "asc" ? " ▲" : " ▼")}
               </TableHead>
-              <TableHead>Lỗi</TableHead>
+              <TableHead>{t("colError")}</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("sent_at")}>
-                Thời gian gửi{sortColumn === "sent_at" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {t("colSentAt")}
+                {sortColumn === "sent_at" && (sortDir === "asc" ? " ▲" : " ▼")}
               </TableHead>
             </TableRow>
             <TableRow>
               <TableHead>
                 <Input
                   className="h-7 text-xs"
-                  placeholder="Lọc SĐT..."
+                  placeholder={t("filterPhone")}
                   value={filterPhone}
                   onChange={(e) => setFilterPhone(e.target.value)}
                 />
@@ -177,7 +182,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
               <TableHead>
                 <Input
                   className="h-7 text-xs"
-                  placeholder="Lọc tên KH..."
+                  placeholder={t("filterCustomer")}
                   value={filterName}
                   onChange={(e) => setFilterName(e.target.value)}
                 />
@@ -186,15 +191,15 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                 <Select
                   value={filterSendMode}
                   onValueChange={(v) => setFilterSendMode(v ?? ALL_MODE)}
-                  items={{ [ALL_MODE]: "— Tất cả —", uid: "UID", phone: "SĐT" }}
+                  items={{ [ALL_MODE]: `— ${t("allModes")} —`, uid: "UID", phone: t("colPhone") }}
                 >
                   <SelectTrigger className="h-7 w-full text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={ALL_MODE}>— Tất cả —</SelectItem>
+                    <SelectItem value={ALL_MODE}>— {t("allModes")} —</SelectItem>
                     <SelectItem value="uid">UID</SelectItem>
-                    <SelectItem value="phone">SĐT</SelectItem>
+                    <SelectItem value="phone">{t("colPhone")}</SelectItem>
                   </SelectContent>
                 </Select>
               </TableHead>
@@ -203,7 +208,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                   value={filterStatus}
                   onValueChange={(v) => setFilterStatus(v ?? ALL_STATUS)}
                   items={{
-                    [ALL_STATUS]: "— Tất cả —",
+                    [ALL_STATUS]: `— ${t("allStatus")} —`,
                     ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
                   }}
                 >
@@ -211,7 +216,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={ALL_STATUS}>— Tất cả —</SelectItem>
+                    <SelectItem value={ALL_STATUS}>— {t("allStatus")} —</SelectItem>
                     {Object.entries(STATUS_LABEL).map(([k, v]) => (
                       <SelectItem key={k} value={k}>
                         {v.label}
@@ -228,13 +233,13 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
             {loading ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  Đang tải...
+                  {t("loading")}
                 </TableCell>
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  Không có người nhận nào khớp điều kiện
+                  {t("noRows")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -265,13 +270,13 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Trước
+            {t("previous")}
           </Button>
           <span className="text-sm text-muted-foreground">
-            Trang {page}/{totalPages}
+            {t("pagePrefix")} {page}/{totalPages}
           </span>
           <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-            Sau
+            {t("next")}
           </Button>
         </div>
       )}

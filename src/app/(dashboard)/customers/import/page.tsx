@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { mapAndValidateCustomerRows, type ValidatedCustomerRow } from "@/lib/spreadsheet/import";
+import { useTranslation } from "@/components/i18n-provider";
 
 const NONE = "__none__";
 
@@ -33,11 +34,12 @@ interface ColumnSelectProps {
   label: string;
   value: string;
   headers: string[];
+  noMappingLabel: string;
   onChange: (value: string) => void;
 }
 
-function ColumnSelect({ field, label, value, headers, onChange }: ColumnSelectProps) {
-  const items = Object.fromEntries([[NONE, "— Không map —"], ...headers.map((h) => [h, h])]);
+function ColumnSelect({ field, label, value, headers, noMappingLabel, onChange }: ColumnSelectProps) {
+  const items = Object.fromEntries([[NONE, noMappingLabel], ...headers.map((h) => [h, h])]);
   return (
     <div className="space-y-1">
       <Label htmlFor={field}>{label}</Label>
@@ -46,7 +48,7 @@ function ColumnSelect({ field, label, value, headers, onChange }: ColumnSelectPr
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={NONE}>— Không map —</SelectItem>
+          <SelectItem value={NONE}>{noMappingLabel}</SelectItem>
           {headers.map((h) => (
             <SelectItem key={h} value={h}>
               {h}
@@ -73,6 +75,7 @@ function downloadSampleTemplate() {
 
 export default function CustomersImportPage() {
   const router = useRouter();
+  const { t } = useTranslation("customersImport");
   const [batchName, setBatchName] = useState("");
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -147,22 +150,22 @@ export default function CustomersImportPage() {
 
   return (
     <div className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">Import khách hàng từ file</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>0. Tải file mẫu (không bắt buộc)</CardTitle>
+          <CardTitle>{t("step0Title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <Button variant="outline" onClick={downloadSampleTemplate}>
-            Tải file mẫu Excel
+            {t("downloadSample")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Chọn file (.xlsx/.csv)</CardTitle>
+          <CardTitle>{t("step1Title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <Input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} />
@@ -172,53 +175,55 @@ export default function CustomersImportPage() {
       {headers.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>2. Đặt tên lô nhập & map cột</CardTitle>
+            <CardTitle>{t("step2Title")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1">
-              <Label>Tên lô nhập (dùng để lọc/xoá lại sau này, và chọn khi tạo chiến dịch)</Label>
+              <Label>{t("batchNameLabel")}</Label>
               <Input value={batchName} onChange={(e) => setBatchName(e.target.value)} />
             </div>
             <ColumnSelect
               field="phone"
-              label="Số điện thoại"
+              label={t("colPhone")}
               value={mapping.phone}
               headers={headers}
+              noMappingLabel={t("noMapping")}
               onChange={(v) => setMappingField("phone", v)}
             />
             <ColumnSelect
               field="name"
-              label="Tên"
+              label={t("colName")}
               value={mapping.name}
               headers={headers}
+              noMappingLabel={t("noMapping")}
               onChange={(v) => setMappingField("name", v)}
             />
             <ColumnSelect
               field="customer_code"
-              label="Mã khách hàng"
+              label={t("colCode")}
               value={mapping.customer_code}
               headers={headers}
+              noMappingLabel={t("noMapping")}
               onChange={(v) => setMappingField("customer_code", v)}
             />
             <ColumnSelect
               field="zalo_uid"
-              label="Zalo UID (nếu có)"
+              label={t("colZaloUid")}
               value={mapping.zalo_uid}
               headers={headers}
+              noMappingLabel={t("noMapping")}
               onChange={(v) => setMappingField("zalo_uid", v)}
             />
             <ColumnSelect
               field="group"
-              label="Nhóm (nếu có — nhiều nhóm cách nhau bằng dấu phẩy)"
+              label={t("colGroup")}
               value={mapping.group}
               headers={headers}
+              noMappingLabel={t("noMapping")}
               onChange={(v) => setMappingField("group", v)}
             />
-            <p className="text-sm text-muted-foreground">
-              Khách hàng cần có ít nhất SĐT hoặc Zalo UID. Nhóm chưa tồn tại sẽ tự được tạo. Các cột còn
-              lại chưa map sẽ được lưu vào trường phụ (extra_fields).
-            </p>
-            <Button onClick={handlePreview}>Xem trước</Button>
+            <p className="text-sm text-muted-foreground">{t("mappingHint")}</p>
+            <Button onClick={handlePreview}>{t("preview")}</Button>
           </CardContent>
         </Card>
       )}
@@ -227,24 +232,22 @@ export default function CustomersImportPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              3. Xác nhận import — {validCount} dòng hợp lệ, {invalidRows.length} dòng lỗi
+              {t("step3Title")} — {validCount} {t("validRows")}, {invalidRows.length} {t("invalidRows")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {invalidRows.length > 0 && (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-destructive">
-                  Các dòng lỗi sau sẽ bị loại khi import:
-                </p>
+                <p className="text-sm font-medium text-destructive">{t("invalidRowsWarning")}</p>
                 <div className="max-h-64 overflow-y-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Dòng</TableHead>
-                        <TableHead>Tên</TableHead>
-                        <TableHead>SĐT</TableHead>
-                        <TableHead>Zalo UID</TableHead>
-                        <TableHead>Lỗi</TableHead>
+                        <TableHead>{t("colRow")}</TableHead>
+                        <TableHead>{t("colName")}</TableHead>
+                        <TableHead>{t("colPhone")}</TableHead>
+                        <TableHead>{t("colZaloUid")}</TableHead>
+                        <TableHead>{t("colError")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -269,10 +272,10 @@ export default function CustomersImportPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Tên</TableHead>
-                    <TableHead>SĐT</TableHead>
-                    <TableHead>Zalo UID</TableHead>
-                    <TableHead>Nhóm</TableHead>
+                    <TableHead>{t("colName")}</TableHead>
+                    <TableHead>{t("colPhone")}</TableHead>
+                    <TableHead>{t("colZaloUid")}</TableHead>
+                    <TableHead>{t("colGroup")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -291,7 +294,7 @@ export default function CustomersImportPage() {
             </div>
 
             <Button onClick={handleConfirmImport} disabled={submitting || validCount === 0}>
-              {submitting ? "Đang import..." : `Xác nhận import ${validCount} dòng hợp lệ`}
+              {submitting ? t("importing") : `${t("confirmImport")} ${validCount} ${t("validRows")}`}
             </Button>
           </CardContent>
         </Card>

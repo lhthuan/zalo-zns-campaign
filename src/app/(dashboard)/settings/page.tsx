@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface SettingsData {
   zaloAppId: string | null;
@@ -54,6 +55,7 @@ interface LogEntry {
 }
 
 export default function SettingsPage() {
+  const { t } = useTranslation("settings");
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [appId, setAppId] = useState("");
   const [secretKey, setSecretKey] = useState("");
@@ -228,70 +230,68 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">Cài đặt kết nối Zalo</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. App ID / App Secret Key</CardTitle>
+          <CardTitle>{t("section1")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {settings && (
             <p className="text-sm text-muted-foreground">
-              Hiện tại: App ID{" "}
-              <span className="font-mono">{settings.zaloAppId ?? "(chưa đặt)"}</span> — Secret Key:{" "}
+              {t("currentPrefix")}{" "}
+              <span className="font-mono">{settings.zaloAppId ?? t("notSetParens")}</span> —{" "}
+              {t("secretKeyLabel")}{" "}
               {settings.hasSecretKey ? (
-                <Badge variant="default">đã đặt</Badge>
+                <Badge variant="default">{t("set")}</Badge>
               ) : (
-                <Badge variant="destructive">chưa đặt</Badge>
+                <Badge variant="destructive">{t("notSet")}</Badge>
               )}
             </p>
           )}
           <div className="space-y-1">
-            <Label>Zalo App ID</Label>
+            <Label>{t("appIdLabel")}</Label>
             <Input value={appId} onChange={(e) => setAppId(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>Zalo App Secret Key</Label>
+            <Label>{t("appSecretLabel")}</Label>
             <Input
               type="password"
               value={secretKey}
               onChange={(e) => setSecretKey(e.target.value)}
-              placeholder={settings?.hasSecretKey ? "•••••••• (đã đặt, nhập để đổi)" : ""}
+              placeholder={settings?.hasSecretKey ? t("appSecretPlaceholder") : ""}
             />
           </div>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Đang lưu..." : "Lưu"}
+            {saving ? t("saving") : t("save")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>2. Kết nối OAuth với Zalo OA</CardTitle>
+          <CardTitle>{t("section2")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Sau khi lưu App ID/Secret ở trên, bấm nút dưới để đăng nhập với tư cách admin OA và cấp
-            quyền cho ứng dụng. Chỉ cần làm 1 lần (hoặc lại khi refresh token hết hạn sau 3 tháng).
-          </p>
+          <p className="text-sm text-muted-foreground">{t("oauthHint")}</p>
           <Button variant="outline" render={<a href="/api/zalo/oauth/start" />}>
-            Kết nối với Zalo
+            {t("connectZalo")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>3. Test kết nối</CardTitle>
+          <CardTitle>{t("section3")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button variant="outline" onClick={handleTest} disabled={testing}>
-            {testing ? "Đang kiểm tra..." : "Test kết nối"}
+            {testing ? t("testing") : t("testConnection")}
           </Button>
 
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 font-mono text-xs">
             {log.length === 0 ? (
-              <p className="text-muted-foreground">Chưa có log nào.</p>
+              <p className="text-muted-foreground">{t("noLogs")}</p>
             ) : (
               log.map((entry, i) => (
                 <p key={i} className={entry.level === "error" ? "text-destructive" : ""}>
@@ -305,48 +305,45 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>4. API key cho hệ thống ngoài (POST /api/sendzns)</CardTitle>
+          <CardTitle>{t("section4")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Cấp 1 key riêng cho từng hệ thống ngoài (website, POS, CRM...) muốn tự gọi gửi ZNS trực
-            tiếp, không qua giao diện này. Mỗi key xoá/tắt riêng không ảnh hưởng hệ thống khác.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("apiKeyHint")}</p>
           <div className="grid grid-cols-3 gap-2">
             <Input
-              placeholder="Tên hệ thống, vd: Website đặt hàng"
+              placeholder={t("systemNamePlaceholder")}
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
             />
             <Input
               type="number"
               min={1}
-              placeholder="Giới hạn tổng số tin (để trống = không giới hạn)"
+              placeholder={t("maxTotalPlaceholder")}
               value={newKeyMaxTotal}
               onChange={(e) => setNewKeyMaxTotal(e.target.value)}
             />
             <Input
               type="number"
               min={1}
-              placeholder="Giới hạn tin/ngày (để trống = không giới hạn)"
+              placeholder={t("maxDailyPlaceholder")}
               value={newKeyMaxDaily}
               onChange={(e) => setNewKeyMaxDaily(e.target.value)}
             />
           </div>
           <Button onClick={handleCreateKey} disabled={creatingKey}>
-            {creatingKey ? "Đang tạo..." : "Tạo key mới"}
+            {creatingKey ? t("creatingKey") : t("createKey")}
           </Button>
 
           {apiKeys.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tên</TableHead>
-                  <TableHead>Key</TableHead>
-                  <TableHead>Trạng thái</TableHead>
-                  <TableHead>Đã gửi / Giới hạn</TableHead>
-                  <TableHead>Dùng lần cuối</TableHead>
-                  <TableHead className="text-right">Hành động</TableHead>
+                  <TableHead>{t("colName")}</TableHead>
+                  <TableHead>{t("colKey")}</TableHead>
+                  <TableHead>{t("colStatus")}</TableHead>
+                  <TableHead>{t("colSentLimit")}</TableHead>
+                  <TableHead>{t("colLastUsed")}</TableHead>
+                  <TableHead className="text-right">{t("colActions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -356,27 +353,29 @@ export default function SettingsPage() {
                     <TableCell className="font-mono text-xs">{k.key_prefix}…</TableCell>
                     <TableCell>
                       <Badge variant={k.is_active ? "success" : "outline"}>
-                        {k.is_active ? "Đang hoạt động" : "Đã tắt"}
+                        {k.is_active ? t("active") : t("inactive")}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       <p>
-                        Tổng: {k.total_sends} / {k.max_total_sends ?? "∞"}
+                        {t("totalPrefix")} {k.total_sends} / {k.max_total_sends ?? "∞"}
                       </p>
-                      <p>Giới hạn/ngày: {k.max_daily_sends ?? "∞"}</p>
+                      <p>
+                        {t("dailyLimitPrefix")} {k.max_daily_sends ?? "∞"}
+                      </p>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {k.last_used_at ? new Date(k.last_used_at).toLocaleString("vi-VN") : "Chưa dùng"}
+                      {k.last_used_at ? new Date(k.last_used_at).toLocaleString("vi-VN") : t("neverUsed")}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button variant="ghost" size="sm" onClick={() => openEditLimits(k)}>
-                        Sửa giới hạn
+                        {t("editLimits")}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => handleToggleKey(k)}>
-                        {k.is_active ? "Tắt" : "Bật"}
+                        {k.is_active ? t("disable") : t("enable")}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => handleDeleteKey(k)}>
-                        Xoá
+                        {t("delete")}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -389,32 +388,28 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>5. Chuẩn hoá SĐT khách hàng hiện có</CardTitle>
+          <CardTitle>{t("section5")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Chuyển SĐT của khách hàng đã có trong hệ thống (nhập trước khi chuẩn hoá được áp dụng) về
-            đúng định dạng 84xxxxxxxxx mà Zalo yêu cầu. Không tự gộp khách hàng trùng — nếu 2 khách hàng
-            khác nhau đang lưu cùng 1 số thật dưới 2 định dạng khác nhau, sẽ báo ra để bạn tự xử lý.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("backfillHint")}</p>
           <Button variant="outline" onClick={handleBackfillPhones} disabled={backfilling}>
-            {backfilling ? "Đang chuẩn hoá..." : "Chuẩn hoá SĐT"}
+            {backfilling ? t("normalizing") : t("normalizePhones")}
           </Button>
 
           {backfillResult && (
             <div className="space-y-2 text-sm">
               <p>
-                Đã cập nhật <strong>{backfillResult.updated}</strong> SĐT.
+                {t("updatedPrefix")} <strong>{backfillResult.updated}</strong> {t("updatedSuffix")}
               </p>
               {backfillResult.unconvertible.length > 0 && (
                 <div>
                   <p className="font-medium text-destructive">
-                    {backfillResult.unconvertible.length} SĐT không chuyển đổi được (cần sửa tay):
+                    {backfillResult.unconvertible.length} {t("unconvertibleSuffix")}
                   </p>
                   <ul className="list-disc pl-5 text-muted-foreground">
                     {backfillResult.unconvertible.map((c) => (
                       <li key={c.id}>
-                        {c.name ?? "(chưa có tên)"} — {c.phone}
+                        {c.name ?? t("noNamePlaceholder")} — {c.phone}
                       </li>
                     ))}
                   </ul>
@@ -423,12 +418,12 @@ export default function SettingsPage() {
               {backfillResult.conflicts.length > 0 && (
                 <div>
                   <p className="font-medium text-destructive">
-                    {backfillResult.conflicts.length} số bị trùng giữa 2+ khách hàng (cần gộp/sửa tay):
+                    {backfillResult.conflicts.length} {t("conflictsSuffix")}
                   </p>
                   <ul className="list-disc pl-5 text-muted-foreground">
                     {backfillResult.conflicts.map((c) => (
                       <li key={c.canonicalPhone}>
-                        {c.canonicalPhone} — các khách hàng ID: {c.customerIds.join(", ")}
+                        {c.canonicalPhone} — {t("customerIdsPrefix")} {c.customerIds.join(", ")}
                       </li>
                     ))}
                   </ul>
@@ -442,11 +437,13 @@ export default function SettingsPage() {
       <Dialog open={editingLimitsFor != null} onOpenChange={(open) => !open && setEditingLimitsFor(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Sửa giới hạn — {editingLimitsFor?.name}</DialogTitle>
+            <DialogTitle>
+              {t("editLimitsTitle")} {editingLimitsFor?.name}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Giới hạn tổng số tin (để trống = không giới hạn)</Label>
+              <Label>{t("maxTotalLabel")}</Label>
               <Input
                 type="number"
                 min={1}
@@ -455,7 +452,7 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label>Giới hạn số tin mỗi ngày (để trống = không giới hạn)</Label>
+              <Label>{t("maxDailyLabel")}</Label>
               <Input
                 type="number"
                 min={1}
@@ -466,10 +463,10 @@ export default function SettingsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingLimitsFor(null)}>
-              Huỷ
+              {t("cancel")}
             </Button>
             <Button onClick={handleSaveLimits} disabled={savingLimits}>
-              {savingLimits ? "Đang lưu..." : "Lưu"}
+              {savingLimits ? t("saving") : t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -478,12 +475,10 @@ export default function SettingsPage() {
       <Dialog open={newPlaintextKey != null} onOpenChange={(open) => !open && setNewPlaintextKey(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Đã tạo key mới</DialogTitle>
+            <DialogTitle>{t("newKeyTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <p className="text-sm text-destructive">
-              Chỉ hiển thị đúng 1 lần — copy và lưu lại ngay, đóng cửa sổ này sẽ không xem lại được.
-            </p>
+            <p className="text-sm text-destructive">{t("newKeyWarning")}</p>
             <p className="rounded-md border bg-muted/30 p-3 font-mono text-sm break-all">
               {newPlaintextKey}
             </p>
@@ -495,7 +490,7 @@ export default function SettingsPage() {
                 toast.success("Đã copy vào clipboard");
               }}
             >
-              Copy
+              {t("copy")}
             </Button>
           </DialogFooter>
         </DialogContent>

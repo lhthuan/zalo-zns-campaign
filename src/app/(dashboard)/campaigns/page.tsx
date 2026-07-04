@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface Campaign {
   id: string;
@@ -35,24 +36,27 @@ interface Campaign {
   zalo_templates: { template_name: string } | null;
 }
 
-const STATUS_LABEL: Record<
-  string,
-  { label: string; variant: "success" | "warning" | "destructive" | "outline" }
-> = {
-  draft: { label: "Nháp", variant: "outline" },
-  sending: { label: "Đang gửi", variant: "warning" },
-  completed: { label: "Hoàn tất", variant: "success" },
-  completed_with_errors: { label: "Hoàn tất (có lỗi)", variant: "warning" },
-  failed: { label: "Thất bại", variant: "destructive" },
-};
 const ALL_STATUS = "__all__";
-const statusItems = {
-  [ALL_STATUS]: "— Tất cả trạng thái —",
-  ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
-};
 
 export default function CampaignsPage() {
   const router = useRouter();
+  const { t } = useTranslation("campaigns");
+  const { t: tStatus } = useTranslation("campaignStatus");
+
+  const STATUS_LABEL: Record<
+    string,
+    { label: string; variant: "success" | "warning" | "destructive" | "outline" }
+  > = {
+    draft: { label: tStatus("draft"), variant: "outline" },
+    sending: { label: tStatus("sending"), variant: "warning" },
+    completed: { label: tStatus("completed"), variant: "success" },
+    completed_with_errors: { label: tStatus("completed_with_errors"), variant: "warning" },
+    failed: { label: tStatus("failed"), variant: "destructive" },
+  };
+  const statusItems = {
+    [ALL_STATUS]: `— ${t("allStatus")} —`,
+    ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
+  };
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
@@ -131,7 +135,7 @@ export default function CampaignsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Chiến dịch</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
@@ -139,27 +143,27 @@ export default function CampaignsPage() {
               checked={showHidden}
               onChange={(e) => setShowHidden(e.target.checked)}
             />
-            Hiện cả chiến dịch đã ẩn
+            {t("showHidden")}
           </label>
-          <Button render={<Link href="/campaigns/new" />}>Tạo chiến dịch</Button>
+          <Button render={<Link href="/campaigns/new" />}>{t("createCampaign")}</Button>
         </div>
       </div>
 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Tên</TableHead>
-            <TableHead>Template</TableHead>
-            <TableHead>Trạng thái</TableHead>
-            <TableHead>Đã gửi / Lỗi / Tổng</TableHead>
-            <TableHead>Ngày tạo</TableHead>
-            <TableHead className="text-right">Hành động</TableHead>
+            <TableHead>{t("colName")}</TableHead>
+            <TableHead>{t("colTemplate")}</TableHead>
+            <TableHead>{t("colStatus")}</TableHead>
+            <TableHead>{t("colCounts")}</TableHead>
+            <TableHead>{t("colCreatedAt")}</TableHead>
+            <TableHead className="text-right">{t("colActions")}</TableHead>
           </TableRow>
           <TableRow>
             <TableHead>
               <Input
                 className="h-7 text-xs"
-                placeholder="Lọc theo tên..."
+                placeholder={t("filterName")}
                 value={filterName}
                 onChange={(e) => setFilterName(e.target.value)}
               />
@@ -167,7 +171,7 @@ export default function CampaignsPage() {
             <TableHead>
               <Input
                 className="h-7 text-xs"
-                placeholder="Lọc theo template..."
+                placeholder={t("filterTemplate")}
                 value={filterTemplate}
                 onChange={(e) => setFilterTemplate(e.target.value)}
               />
@@ -178,7 +182,7 @@ export default function CampaignsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL_STATUS}>— Tất cả trạng thái —</SelectItem>
+                  <SelectItem value={ALL_STATUS}>— {t("allStatus")} —</SelectItem>
                   {Object.entries(STATUS_LABEL).map(([k, v]) => (
                     <SelectItem key={k} value={k}>
                       {v.label}
@@ -196,13 +200,13 @@ export default function CampaignsPage() {
           {loading ? (
             <TableRow>
               <TableCell colSpan={6} className="text-center text-muted-foreground">
-                Đang tải...
+                {t("loading")}
               </TableCell>
             </TableRow>
           ) : visibleCampaigns.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="text-center text-muted-foreground">
-                Chưa có chiến dịch nào
+                {t("noCampaigns")}
               </TableCell>
             </TableRow>
           ) : (
@@ -218,7 +222,7 @@ export default function CampaignsPage() {
                     <span className="hover:underline">{c.name}</span>
                     {c.is_hidden && (
                       <Badge variant="outline" className="ml-2">
-                        Đã ẩn
+                        {t("hiddenBadge")}
                       </Badge>
                     )}
                   </TableCell>
@@ -234,10 +238,10 @@ export default function CampaignsPage() {
                   </TableCell>
                   <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="sm" onClick={(e) => copyCampaign(c.id, e)}>
-                      Sao chép
+                      {t("copy")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={(e) => toggleHidden(c, e)}>
-                      {c.is_hidden ? "Bỏ ẩn" : "Ẩn"}
+                      {c.is_hidden ? t("unhide") : t("hide")}
                     </Button>
                     {c.status === "draft" && (
                       <Button
@@ -246,7 +250,7 @@ export default function CampaignsPage() {
                         onClick={(e) => deleteCampaign(c, e)}
                         disabled={deletingId === c.id}
                       >
-                        {deletingId === c.id ? "Đang xoá..." : "Xoá"}
+                        {deletingId === c.id ? t("deleting") : t("delete")}
                       </Button>
                     )}
                   </TableCell>

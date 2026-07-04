@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 import { formatVnd } from "@/lib/format";
+import { useTranslation } from "@/components/i18n-provider";
 
 const NONE = "__none__";
 
@@ -64,11 +65,12 @@ interface ColumnSelectProps {
   label: string;
   value: string;
   headers: string[];
+  chooseLabel: string;
   onChange: (value: string) => void;
 }
 
-function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
-  const items = Object.fromEntries([[NONE, "— Chọn cột —"], ...headers.map((h) => [h, h])]);
+function ColumnSelect({ label, value, headers, chooseLabel, onChange }: ColumnSelectProps) {
+  const items = Object.fromEntries([[NONE, chooseLabel], ...headers.map((h) => [h, h])]);
   return (
     <div className="space-y-1">
       <Label>{label}</Label>
@@ -77,7 +79,7 @@ function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={NONE}>— Chọn cột —</SelectItem>
+          <SelectItem value={NONE}>{chooseLabel}</SelectItem>
           {headers.map((h) => (
             <SelectItem key={h} value={h}>
               {h}
@@ -92,30 +94,34 @@ function ColumnSelect({ label, value, headers, onChange }: ColumnSelectProps) {
 function TemplatePreview({
   template,
   recipientCount,
+  t,
 }: {
   template: ZaloTemplate;
   recipientCount: number | null;
+  t: ReturnType<typeof useTranslation<"campaignNew">>["t"];
 }) {
   const params = template.template_data_schema ?? [];
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Xem trước template: {template.template_name}</CardTitle>
+          <CardTitle>
+            {t("previewTitle")} {template.template_name}
+          </CardTitle>
           <Badge>{template.tag ?? "—"}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {params.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Template này không có tham số nào.</p>
+          <p className="text-sm text-muted-foreground">{t("noParams")}</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Tham số</TableHead>
-                <TableHead>Kiểu</TableHead>
-                <TableHead>Bắt buộc</TableHead>
-                <TableHead>Độ dài</TableHead>
+                <TableHead>{t("colParam")}</TableHead>
+                <TableHead>{t("colType")}</TableHead>
+                <TableHead>{t("colRequired")}</TableHead>
+                <TableHead>{t("colLength")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -123,7 +129,7 @@ function TemplatePreview({
                 <TableRow key={p.name}>
                   <TableCell className="font-mono text-xs">{p.name}</TableCell>
                   <TableCell>{p.type}</TableCell>
-                  <TableCell>{p.require ? "Có" : "Không"}</TableCell>
+                  <TableCell>{p.require ? t("yes") : t("no")}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {p.minLength || p.maxLength ? `${p.minLength ?? 0}–${p.maxLength ?? "?"}` : "—"}
                   </TableCell>
@@ -136,12 +142,12 @@ function TemplatePreview({
           <div className="space-y-1 text-sm text-muted-foreground">
             {template.price_sdt != null && (
               <p>
-                Đơn giá gửi qua SĐT: <strong className="text-foreground">{formatVnd(template.price_sdt)}</strong>{" "}
-                / tin
+                {t("priceSdt")}: <strong className="text-foreground">{formatVnd(template.price_sdt)}</strong>{" "}
+                {t("perMessage")}
                 {recipientCount != null && recipientCount > 0 && (
                   <>
                     {" "}
-                    × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
+                    × {recipientCount.toLocaleString("vi-VN")} {t("recipientsUnit")} ≈{" "}
                     <strong className="text-foreground">
                       {formatVnd(template.price_sdt * recipientCount)}
                     </strong>
@@ -151,12 +157,12 @@ function TemplatePreview({
             )}
             {template.price_uid != null && (
               <p>
-                Đơn giá gửi qua UID: <strong className="text-foreground">{formatVnd(template.price_uid)}</strong>{" "}
-                / tin
+                {t("priceUid")}: <strong className="text-foreground">{formatVnd(template.price_uid)}</strong>{" "}
+                {t("perMessage")}
                 {recipientCount != null && recipientCount > 0 && (
                   <>
                     {" "}
-                    × {recipientCount.toLocaleString("vi-VN")} người nhận ≈{" "}
+                    × {recipientCount.toLocaleString("vi-VN")} {t("recipientsUnit")} ≈{" "}
                     <strong className="text-foreground">
                       {formatVnd(template.price_uid * recipientCount)}
                     </strong>
@@ -164,10 +170,7 @@ function TemplatePreview({
                 )}
               </p>
             )}
-            <p className="text-xs">
-              Chi phí thực tế phụ thuộc mỗi người nhận gửi qua SĐT hay UID — số trên chỉ là ước tính nếu
-              toàn bộ người nhận cùng 1 chế độ.
-            </p>
+            <p className="text-xs">{t("approxCost")}</p>
           </div>
         )}
       </CardContent>
@@ -176,8 +179,9 @@ function TemplatePreview({
 }
 
 export default function NewCampaignPage() {
+  const { t } = useTranslation("campaignNew");
   return (
-    <Suspense fallback={<p className="text-muted-foreground">Đang tải...</p>}>
+    <Suspense fallback={<p className="text-muted-foreground">{t("loading")}</p>}>
       <NewCampaignForm />
     </Suspense>
   );
@@ -185,6 +189,7 @@ export default function NewCampaignPage() {
 
 function NewCampaignForm() {
   const router = useRouter();
+  const { t } = useTranslation("campaignNew");
   const searchParams = useSearchParams();
   const copyFromId = searchParams.get("copyFrom");
 
@@ -215,7 +220,7 @@ function NewCampaignForm() {
   useEffect(() => {
     fetch("/api/templates")
       .then((res) => res.json())
-      .then((json) => setTemplates((json.data ?? []).filter((t: ZaloTemplate) => t.status === "ENABLE")))
+      .then((json) => setTemplates((json.data ?? []).filter((tpl: ZaloTemplate) => tpl.status === "ENABLE")))
       .catch(() => toast.error("Không tải được danh sách template"));
     fetch("/api/customers/import-batches")
       .then((res) => res.json())
@@ -260,7 +265,7 @@ function NewCampaignForm() {
       .catch(() => toast.error("Không tải được chiến dịch để sao chép"));
   }, [copyFromId]);
 
-  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const selectedTemplate = templates.find((tpl) => tpl.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
   const broadcastCount =
     broadcastSource === "all"
@@ -270,7 +275,7 @@ function NewCampaignForm() {
         : groups.find((g) => g.group_id === customerGroupId)?.customer_count ?? 0;
   const recipientCount = mode === "broadcast" ? broadcastCount : rowCount;
 
-  const templateItems = Object.fromEntries(templates.map((t) => [t.id, t.template_name]));
+  const templateItems = Object.fromEntries(templates.map((tpl) => [tpl.id, tpl.template_name]));
   const batchItems = Object.fromEntries(
     batches.map((b) => [b.import_batch, `${b.import_batch} (${b.customer_count})`])
   );
@@ -369,27 +374,27 @@ function NewCampaignForm() {
 
   return (
     <div className="max-w-4xl space-y-4">
-      <h1 className="text-xl font-semibold">Tạo chiến dịch mới</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Thông tin chung</CardTitle>
+          <CardTitle>{t("step1Title")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
-            <Label>Tên chiến dịch</Label>
+            <Label>{t("campaignName")}</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>Template</Label>
+            <Label>{t("template")}</Label>
             <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")} items={templateItems}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Chọn template" />
+                <SelectValue placeholder={t("chooseTemplate")} />
               </SelectTrigger>
               <SelectContent>
-                {templates.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.template_name}
+                {templates.map((tpl) => (
+                  <SelectItem key={tpl.id} value={tpl.id}>
+                    {tpl.template_name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -399,28 +404,25 @@ function NewCampaignForm() {
       </Card>
 
       {selectedTemplate && (
-        <TemplatePreview template={selectedTemplate} recipientCount={recipientCount} />
+        <TemplatePreview template={selectedTemplate} recipientCount={recipientCount} t={t} />
       )}
 
       {selectedTemplate && (
         <Card>
           <CardHeader>
-            <CardTitle>2. Chế độ gửi</CardTitle>
+            <CardTitle>{t("step2Title")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs value={mode} onValueChange={(v) => setMode((v as "broadcast" | "custom") ?? "broadcast")}>
               <TabsList>
-                <TabsTrigger value="broadcast">Gửi hàng loạt (1 nội dung)</TabsTrigger>
-                <TabsTrigger value="custom">Gửi tuỳ biến (tải file)</TabsTrigger>
+                <TabsTrigger value="broadcast">{t("modeBroadcast")}</TabsTrigger>
+                <TabsTrigger value="custom">{t("modeCustom")}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="broadcast" className="space-y-4 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Điền cố định tham số bên dưới — nội dung giống nhau sẽ được gửi cho tất cả khách hàng
-                  trong danh sách bạn chọn.
-                </p>
+                <p className="text-sm text-muted-foreground">{t("broadcastHint")}</p>
                 <div className="space-y-1">
-                  <Label>Danh sách khách hàng</Label>
+                  <Label>{t("customerListLabel")}</Label>
                   <Tabs
                     value={broadcastSource}
                     onValueChange={(v) =>
@@ -428,14 +430,14 @@ function NewCampaignForm() {
                     }
                   >
                     <TabsList>
-                      <TabsTrigger value="all">Tất cả khách hàng</TabsTrigger>
-                      <TabsTrigger value="batch">Theo lô upload</TabsTrigger>
-                      <TabsTrigger value="group">Theo nhóm khách hàng</TabsTrigger>
+                      <TabsTrigger value="all">{t("sourceAll")}</TabsTrigger>
+                      <TabsTrigger value="batch">{t("sourceBatch")}</TabsTrigger>
+                      <TabsTrigger value="group">{t("sourceGroup")}</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="all" className="pt-3">
                       <p className="text-sm text-muted-foreground">
-                        Gửi tới toàn bộ {allCustomerCount.toLocaleString("vi-VN")} khách hàng hiện có.
+                        {t("sendToAll")} {allCustomerCount.toLocaleString("vi-VN")} {t("customersExisting")}
                       </p>
                     </TabsContent>
 
@@ -446,7 +448,7 @@ function NewCampaignForm() {
                         items={batchItems}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Chọn lô đã upload" />
+                          <SelectValue placeholder={t("chooseBatch")} />
                         </SelectTrigger>
                         <SelectContent>
                           {batches.map((b) => (
@@ -456,10 +458,7 @@ function NewCampaignForm() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Các lô này được tạo khi bạn import file ở trang Khách hàng, hoặc tự động đặt tên
-                        theo chiến dịch &quot;Gửi tuỳ biến&quot; trước đó.
-                      </p>
+                      <p className="text-xs text-muted-foreground">{t("batchHint")}</p>
                     </TabsContent>
 
                     <TabsContent value="group" className="space-y-1 pt-3">
@@ -469,7 +468,7 @@ function NewCampaignForm() {
                         items={groupItems}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Chọn nhóm khách hàng" />
+                          <SelectValue placeholder={t("chooseGroup")} />
                         </SelectTrigger>
                         <SelectContent>
                           {groups.map((g) => (
@@ -479,24 +478,21 @@ function NewCampaignForm() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Nhóm khách hàng được quản lý ở trang Khách hàng.
-                      </p>
+                      <p className="text-xs text-muted-foreground">{t("groupHint")}</p>
                     </TabsContent>
                   </Tabs>
                 </div>
 
                 {params.length > 0 && (
                   <div className="space-y-3 border-t pt-3">
-                    <p className="text-sm font-medium">Tham số template (áp dụng cho tất cả)</p>
+                    <p className="text-sm font-medium">{t("templateParamsAll")}</p>
                     {params.map((p) => (
                       <div key={p.name} className="space-y-1">
                         <Label>
                           {p.name} {p.require && <span className="text-destructive">*</span>}
                           <span className="ml-2 font-normal text-xs text-muted-foreground">
                             {p.type}
-                            {(p.minLength || p.maxLength) &&
-                              ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự`}
+                            {(p.minLength || p.maxLength) && ` · ${p.minLength ?? 0}–${p.maxLength ?? "?"}`}
                           </span>
                         </Label>
                         <Input
@@ -513,54 +509,57 @@ function NewCampaignForm() {
               </TabsContent>
 
               <TabsContent value="custom" className="space-y-4 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Mỗi khách hàng có thể nhận nội dung khác nhau — tải file mẫu, điền số điện thoại + tên +
-                  tham số riêng cho từng người, rồi tải lên lại.
-                </p>
+                <p className="text-sm text-muted-foreground">{t("customHint")}</p>
                 <Button variant="outline" onClick={downloadDataTemplate}>
-                  Tải file mẫu Excel cho template này
+                  {t("downloadSample")}
                 </Button>
                 <div className="space-y-1">
-                  <Label>File danh sách người nhận (.xlsx/.csv)</Label>
+                  <Label>{t("recipientFile")}</Label>
                   <Input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} />
                 </div>
 
                 {headers.length > 0 && (
                   <div className="space-y-3 border-t pt-3">
-                    <p className="text-sm font-medium">Map cột file ({rowCount} dòng)</p>
+                    <p className="text-sm font-medium">
+                      {t("mapColumns")} ({rowCount} {t("rows")})
+                    </p>
                     <ColumnSelect
-                      label="Số điện thoại"
+                      label={t("colPhone")}
                       value={phoneColumn}
                       headers={headers}
+                      chooseLabel={t("chooseColumn")}
                       onChange={setPhoneColumn}
                     />
-                    <ColumnSelect label="Tên khách hàng" value={nameColumn} headers={headers} onChange={setNameColumn} />
                     <ColumnSelect
-                      label="Zalo UID (nếu file có sẵn)"
+                      label={t("colName")}
+                      value={nameColumn}
+                      headers={headers}
+                      chooseLabel={t("chooseColumn")}
+                      onChange={setNameColumn}
+                    />
+                    <ColumnSelect
+                      label={t("colZaloUid")}
                       value={uidColumn}
                       headers={headers}
+                      chooseLabel={t("chooseColumn")}
                       onChange={setUidColumn}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Cần map ít nhất SĐT hoặc Zalo UID. Người nhận sẽ dùng UID nếu có (từ file này hoặc
-                      đã lưu trong hồ sơ khách hàng), ngược lại dùng số điện thoại. Sau khi gửi, những
-                      khách hàng này sẽ được lưu/cập nhật vào danh sách Khách hàng, gắn theo tên chiến
-                      dịch &quot;{name.trim() || "..."}&quot;.
+                      {t("mappingHint")} &quot;{name.trim() || "..."}&quot;.
                     </p>
 
                     {params.length > 0 && (
                       <div className="space-y-3 border-t pt-3">
-                        <p className="text-sm font-medium">Tham số template (mỗi người 1 giá trị riêng)</p>
+                        <p className="text-sm font-medium">{t("templateParamsEach")}</p>
                         {params.map((p) => (
                           <ColumnSelect
                             key={p.name}
                             label={`${p.name}${p.require ? " *" : ""} — ${p.type}${
-                              p.minLength || p.maxLength
-                                ? ` (${p.minLength ?? 0}–${p.maxLength ?? "?"} ký tự)`
-                                : ""
+                              p.minLength || p.maxLength ? ` (${p.minLength ?? 0}–${p.maxLength ?? "?"})` : ""
                             }`}
                             value={paramMapping[p.name] ?? NONE}
                             headers={headers}
+                            chooseLabel={t("chooseColumn")}
                             onChange={(v) =>
                               setParamMapping((m) => ({ ...m, [p.name]: v && v !== NONE ? v : "" }))
                             }
@@ -574,7 +573,7 @@ function NewCampaignForm() {
             </Tabs>
 
             <Button className="mt-4" onClick={handleSubmit} disabled={submitting}>
-              {submitting ? "Đang tạo..." : "Tạo chiến dịch (nháp)"}
+              {submitting ? t("creating") : t("createDraft")}
             </Button>
           </CardContent>
         </Card>

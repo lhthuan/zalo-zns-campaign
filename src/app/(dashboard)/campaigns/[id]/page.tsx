@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface Campaign {
   id: string;
@@ -28,18 +29,12 @@ interface PreviewRow {
   template_data: Record<string, string>;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Nháp",
-  sending: "Đang gửi",
-  completed: "Hoàn tất",
-  completed_with_errors: "Hoàn tất (có lỗi)",
-  failed: "Thất bại",
-};
-
 const ACTIVE_STATUSES = new Set(["sending"]);
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { t } = useTranslation("campaignDetail");
+  const { t: tStatus } = useTranslation("campaignStatus");
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [preview, setPreview] = useState<{ sample: PreviewRow[]; counts: { uid: number; phone: number } } | null>(
     null
@@ -80,10 +75,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       body: JSON.stringify({ is_hidden: !campaign.is_hidden }),
     });
     if (!res.ok) {
-      toast.error("Không cập nhật được");
+      toast.error(t("updateFailed"));
       return;
     }
-    toast.success(campaign.is_hidden ? "Đã bỏ ẩn" : "Đã ẩn chiến dịch");
+    toast.success(campaign.is_hidden ? t("hidSuccess") : t("hideSuccess"));
     load();
   }
 
@@ -100,10 +95,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     });
     setSavingName(false);
     if (!res.ok) {
-      toast.error("Đổi tên thất bại");
+      toast.error(t("renameFailed"));
       return;
     }
-    toast.success("Đã đổi tên chiến dịch");
+    toast.success(t("renameSuccess"));
     setEditingName(false);
     load();
   }
@@ -114,14 +109,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     const json = await res.json();
     setSending(false);
     if (!res.ok) {
-      toast.error(json.error ?? "Gửi thất bại");
+      toast.error(json.error ?? t("sendFailed"));
       return;
     }
-    toast.success(`Đã bắt đầu gửi (${json.batches} batch)`);
+    toast.success(`${t("sendStarted")} (${json.batches} ${t("batches")})`);
     load();
   }
 
-  if (!campaign) return <p className="text-muted-foreground">Đang tải...</p>;
+  if (!campaign) return <p className="text-muted-foreground">{t("loading")}</p>;
 
   const progress =
     campaign.total_recipients > 0
@@ -133,7 +128,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="space-y-4">
       <Button variant="ghost" size="sm" render={<Link href="/campaigns" />}>
-        ← Quay lại danh sách chiến dịch
+        ← {t("backToList")}
       </Button>
 
       <div className="flex items-center justify-between">
@@ -147,10 +142,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 autoFocus
               />
               <Button size="sm" onClick={handleSaveName} disabled={savingName}>
-                {savingName ? "Đang lưu..." : "Lưu"}
+                {savingName ? t("saving") : t("save")}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
-                Huỷ
+                {t("cancel")}
               </Button>
             </div>
           ) : (
@@ -164,50 +159,54 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   setEditingName(true);
                 }}
               >
-                Sửa tên
+                {t("editName")}
               </Button>
             </div>
           )}
           <p className="text-sm text-muted-foreground">
-            Template: {campaign.zalo_templates?.template_name ?? "—"}
+            {t("templateLabel")}: {campaign.zalo_templates?.template_name ?? "—"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge>{STATUS_LABEL[campaign.status] ?? campaign.status}</Badge>
+          <Badge>
+            {tStatus(campaign.status as "draft" | "sending" | "completed" | "completed_with_errors" | "failed")}
+          </Badge>
           <Button variant="outline" size="sm" render={<Link href={`/campaigns/new?copyFrom=${id}`} />}>
-            Sao chép
+            {t("copy")}
           </Button>
           <Button variant="outline" size="sm" onClick={handleToggleHidden}>
-            {campaign.is_hidden ? "Bỏ ẩn" : "Ẩn"}
+            {campaign.is_hidden ? t("unhide") : t("hide")}
           </Button>
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Tiến độ</CardTitle>
+          <CardTitle>{t("progressTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Progress value={progress} />
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">Tổng số</p>
+              <p className="text-xs text-muted-foreground">{t("total")}</p>
               <p className="text-2xl font-semibold">{campaign.total_recipients}</p>
             </div>
             <div className="rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">Đã gửi</p>
+              <p className="text-xs text-muted-foreground">{t("sent")}</p>
               <p className="text-2xl font-semibold">{campaign.sent_count + campaign.failed_count}</p>
               <p className="text-xs text-muted-foreground">
-                <span className="text-emerald-600">{campaign.sent_count} thành công</span> ·{" "}
-                <span className="text-destructive">{campaign.failed_count} lỗi</span>
+                <span className="text-emerald-600">
+                  {campaign.sent_count} {t("success")}
+                </span>{" "}
+                · <span className="text-destructive">{campaign.failed_count} {t("failed")}</span>
               </p>
             </div>
             <div className="rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">Còn lại</p>
+              <p className="text-xs text-muted-foreground">{t("remaining")}</p>
               <p className="text-2xl font-semibold">{remaining}</p>
             </div>
             <div className="rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">Kênh gửi</p>
+              <p className="text-xs text-muted-foreground">{t("channel")}</p>
               {preview ? (
                 <p className="text-sm">
                   UID: <strong>{preview.counts.uid}</strong> · SĐT: <strong>{preview.counts.phone}</strong>
@@ -220,12 +219,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           <div className="flex gap-2">
             {campaign.status === "draft" && (
               <Button onClick={handleSend} disabled={sending}>
-                {sending ? "Đang bắt đầu..." : "Gửi chiến dịch"}
+                {sending ? t("starting") : t("sendCampaign")}
               </Button>
             )}
             {["completed", "completed_with_errors", "failed"].includes(campaign.status) && (
               <Button variant="outline" render={<Link href={`/campaigns/${id}/report`} />}>
-                Xem báo cáo
+                {t("viewReport")}
               </Button>
             )}
           </div>
@@ -234,7 +233,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
       <Card>
         <CardHeader>
-          <CardTitle>Danh sách người nhận</CardTitle>
+          <CardTitle>{t("recipientsTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <CampaignRecipientsGrid campaignId={id} />

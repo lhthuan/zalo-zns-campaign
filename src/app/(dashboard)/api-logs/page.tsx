@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTranslation } from "@/components/i18n-provider";
 
 interface ApiSendLogRow {
   id: string;
@@ -31,6 +32,7 @@ interface ApiSendLogRow {
 const PAGE_SIZE = 20;
 
 export default function ApiLogsPage() {
+  const { t } = useTranslation("apiLogs");
   const [rows, setRows] = useState<ApiSendLogRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -62,15 +64,12 @@ export default function ApiLogsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Nhật ký API</h1>
-        <p className="text-sm text-muted-foreground">
-          Lịch sử gửi ZNS qua API <code className="font-mono">POST /api/sendzns</code> từ các hệ thống
-          ngoài (không phải chiến dịch trong app này).
-        </p>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       <Input
-        placeholder="Tìm theo số điện thoại..."
+        placeholder={t("searchPlaceholder")}
         value={phone}
         onChange={(e) => {
           setPage(1);
@@ -82,26 +81,26 @@ export default function ApiLogsPage() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Thời gian</TableHead>
-            <TableHead>Nguồn (key)</TableHead>
-            <TableHead>SĐT</TableHead>
-            <TableHead>Template ID</TableHead>
-            <TableHead>Chế độ</TableHead>
-            <TableHead>Kết quả</TableHead>
-            <TableHead>Chi tiết</TableHead>
+            <TableHead>{t("colTime")}</TableHead>
+            <TableHead>{t("colSource")}</TableHead>
+            <TableHead>{t("colPhone")}</TableHead>
+            <TableHead>{t("colTemplateId")}</TableHead>
+            <TableHead>{t("colMode")}</TableHead>
+            <TableHead>{t("colResult")}</TableHead>
+            <TableHead>{t("colDetail")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading ? (
             <TableRow>
               <TableCell colSpan={7} className="text-center text-muted-foreground">
-                Đang tải...
+                {t("loading")}
               </TableCell>
             </TableRow>
           ) : rows.length === 0 ? (
             <TableRow>
               <TableCell colSpan={7} className="text-center text-muted-foreground">
-                Chưa có lượt gửi nào qua API
+                {t("noLogs")}
               </TableCell>
             </TableRow>
           ) : (
@@ -116,7 +115,7 @@ export default function ApiLogsPage() {
                 <TableCell>{r.send_mode}</TableCell>
                 <TableCell>
                   <Badge variant={r.success ? "success" : "destructive"}>
-                    {r.success ? "Thành công" : "Thất bại"}
+                    {r.success ? t("success") : t("failed")}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
@@ -129,10 +128,12 @@ export default function ApiLogsPage() {
       </Table>
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>Tổng {total} lượt gửi</span>
+        <span>
+          {t("totalPrefix")} {total} {t("totalSuffix")}
+        </span>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            Trước
+            {t("previous")}
           </Button>
           <span>
             {page}/{totalPages}
@@ -143,7 +144,7 @@ export default function ApiLogsPage() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            Sau
+            {t("next")}
           </Button>
         </div>
       </div>
