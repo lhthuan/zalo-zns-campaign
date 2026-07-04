@@ -381,6 +381,7 @@ export const translations = {
       previewSendTo: "Gửi tới",
       previewCustomersUnit: "khách hàng",
       previewNoParams: "Template này không có tham số nào.",
+      previewLoading: "Đang tải xem trước...",
     },
     settings: {
       title: "Cài đặt kết nối Zalo",
@@ -837,6 +838,7 @@ export const translations = {
       previewSendTo: "발송 대상",
       previewCustomersUnit: "명의 고객",
       previewNoParams: "이 템플릿에는 파라미터가 없습니다.",
+      previewLoading: "미리보기 로딩 중...",
     },
     settings: {
       title: "Zalo 연결 설정",

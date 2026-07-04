@@ -34,9 +34,11 @@ interface ZaloTemplateParam {
 
 interface ZaloTemplate {
   id: string;
+  template_id: string;
   template_name: string;
   status: string;
   template_data_schema: ZaloTemplateParam[] | null;
+  preview_url: string | null;
 }
 
 interface Customer {
@@ -67,6 +69,8 @@ export default function SendTestPage() {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/templates")
@@ -94,6 +98,30 @@ export default function SendTestPage() {
   const params = selectedTemplate?.template_data_schema ?? [];
   const templateItems = Object.fromEntries(templates.map((tpl) => [tpl.id, tpl.template_name]));
   const selectedIds = new Set(selected.map((c) => c.id));
+
+  useEffect(() => {
+    if (!selectedTemplate?.preview_url) {
+      // Clearing a stale preview when the template no longer has one is a
+      // direct reflection of props/state, not an external-system sync.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPreviewHtml(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setPreviewLoading(true);
+      fetch("/api/templates/preview-html", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId: selectedTemplate.template_id, params: paramValues }),
+      })
+        .then((res) => res.json())
+        .then((json) => setPreviewHtml(json.html ?? null))
+        .catch(() => setPreviewHtml(null))
+        .finally(() => setPreviewLoading(false));
+    }, 400);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate?.template_id, selectedTemplate?.preview_url, JSON.stringify(paramValues)]);
 
   function addCustomer(c: Customer) {
     if (selectedIds.has(c.id)) return;
@@ -137,7 +165,7 @@ export default function SendTestPage() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
       <div className="max-w-3xl space-y-4">
         <div>
           <h1 className="text-xl font-semibold">{t("title")}</h1>
@@ -321,7 +349,23 @@ export default function SendTestPage() {
                   )}
                 </div>
 
-                {params.length === 0 ? (
+                {selectedTemplate.preview_url ? (
+                  <div className="relative min-h-[500px] overflow-hidden rounded-lg border">
+                    {previewLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs text-muted-foreground">
+                        {t("previewLoading")}
+                      </div>
+                    )}
+                    {previewHtml && (
+                      <iframe
+                        srcDoc={previewHtml}
+                        title={t("previewTitle")}
+                        sandbox="allow-same-origin"
+                        className="h-[500px] w-full"
+                      />
+                    )}
+                  </div>
+                ) : params.length === 0 ? (
                   <p className="text-muted-foreground">{t("previewNoParams")}</p>
                 ) : (
                   <div className="space-y-1.5">
