@@ -351,6 +351,11 @@ export const translations = {
       chooseColumn: "— Chọn cột —",
       createDraft: "Tạo chiến dịch (nháp)",
       creating: "Đang tạo...",
+      livePreviewTitle: "Xem trước mẫu tin",
+      livePreviewNoTemplate: "Chọn template để xem trước.",
+      livePreviewNoUrl: "Template này chưa có link xem trước.",
+      livePreviewLoading: "Đang tải xem trước...",
+      livePreviewCustomModeHint: "Xem trước dùng tham số cố định — mỗi khách hàng thực tế sẽ có giá trị riêng theo file đã tải lên.",
     },
     sendTest: {
       title: "Gửi thử ZNS",
@@ -808,6 +813,11 @@ export const translations = {
       chooseColumn: "— 열 선택 —",
       createDraft: "캠페인 만들기 (임시저장)",
       creating: "만드는 중...",
+      livePreviewTitle: "메시지 미리보기",
+      livePreviewNoTemplate: "미리보려면 템플릿을 선택하세요.",
+      livePreviewNoUrl: "이 템플릿은 아직 미리보기 링크가 없습니다.",
+      livePreviewLoading: "미리보기 로딩 중...",
+      livePreviewCustomModeHint: "고정 파라미터로 미리보기 중입니다 — 실제로는 업로드한 파일에 따라 고객마다 값이 다릅니다.",
     },
     sendTest: {
       title: "ZNS 테스트 발송",

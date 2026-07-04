@@ -41,10 +41,12 @@ interface ZaloTemplateParam {
 
 interface ZaloTemplate {
   id: string;
+  template_id: string;
   template_name: string;
   status: string;
   tag: string | null;
   template_data_schema: ZaloTemplateParam[] | null;
+  preview_url: string | null;
   price_sdt: number | null;
   price_uid: number | null;
 }
@@ -217,6 +219,9 @@ function NewCampaignForm() {
   const [uidColumn, setUidColumn] = useState(NONE);
   const [paramMapping, setParamMapping] = useState<Record<string, string>>({});
 
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   useEffect(() => {
     fetch("/api/templates")
       .then((res) => res.json())
@@ -282,6 +287,30 @@ function NewCampaignForm() {
   const groupItems = Object.fromEntries(
     groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`])
   );
+
+  useEffect(() => {
+    if (!selectedTemplate?.preview_url) {
+      // Clearing a stale preview when the template no longer has one is a
+      // direct reflection of props/state, not an external-system sync.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPreviewHtml(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setPreviewLoading(true);
+      fetch("/api/templates/preview-html", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId: selectedTemplate.template_id, params: fixedParams }),
+      })
+        .then((res) => res.json())
+        .then((json) => setPreviewHtml(json.html ?? null))
+        .catch(() => setPreviewHtml(null))
+        .finally(() => setPreviewLoading(false));
+    }, 400);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate?.template_id, selectedTemplate?.preview_url, JSON.stringify(fixedParams)]);
 
   function downloadDataTemplate() {
     if (!selectedTemplate) return;
@@ -373,7 +402,8 @@ function NewCampaignForm() {
   }
 
   return (
-    <div className="max-w-4xl space-y-4">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="max-w-4xl space-y-4">
       <h1 className="text-xl font-semibold">{t("title")}</h1>
 
       <Card>
@@ -578,6 +608,41 @@ function NewCampaignForm() {
           </CardContent>
         </Card>
       )}
+      </div>
+
+      <div className="lg:sticky lg:top-20 lg:self-start">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t("livePreviewTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!selectedTemplate ? (
+              <p className="text-sm text-muted-foreground">{t("livePreviewNoTemplate")}</p>
+            ) : !selectedTemplate.preview_url ? (
+              <p className="text-sm text-muted-foreground">{t("livePreviewNoUrl")}</p>
+            ) : (
+              <div className="relative min-h-[500px] overflow-hidden rounded-lg border">
+                {previewLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs text-muted-foreground">
+                    {t("livePreviewLoading")}
+                  </div>
+                )}
+                {previewHtml && (
+                  <iframe
+                    srcDoc={previewHtml}
+                    title={t("livePreviewTitle")}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="h-[500px] w-full"
+                  />
+                )}
+              </div>
+            )}
+            {mode === "custom" && selectedTemplate?.preview_url && (
+              <p className="mt-2 text-xs text-muted-foreground">{t("livePreviewCustomModeHint")}</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
