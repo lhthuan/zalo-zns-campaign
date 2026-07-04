@@ -360,7 +360,7 @@ export default function SendTestPage() {
                       <iframe
                         srcDoc={previewHtml}
                         title={t("previewTitle")}
-                        sandbox="allow-same-origin"
+                        sandbox="allow-scripts allow-same-origin"
                         className="h-[500px] w-full"
                       />
                     )}
