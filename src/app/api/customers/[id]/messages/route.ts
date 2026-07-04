@@ -11,6 +11,7 @@ export interface MessageLogEntry {
   source: "campaign" | "test_send" | "api";
   sourceLabel: string;
   templateLabel: string;
+  templateId: string;
   templateData: Record<string, unknown>;
   sendMode: string;
   success: boolean;
@@ -33,7 +34,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
     const [campaignRes, testSendRes, apiRes] = await Promise.all([
       supabase
         .from("campaign_recipients")
-        .select("id, template_data, send_mode, status, zalo_msg_id, error_code, error_message, sent_at, created_at, campaigns(name, zalo_templates(template_name))")
+        .select("id, template_data, send_mode, status, zalo_msg_id, error_code, error_message, sent_at, created_at, campaigns(name, zalo_templates(template_name, template_id))")
         .eq("customer_id", id)
         .order("created_at", { ascending: false })
         .limit(200),
@@ -54,18 +55,38 @@ export async function GET(_request: Request, { params }: RouteParams) {
     if (testSendRes.error) throw testSendRes.error;
     if (apiRes.error) throw apiRes.error;
 
+    // test_send_log/api_send_log only store Zalo's template_id (text), not the
+    // template name — look up names in bulk to show "Tên template" instead of
+    // a bare numeric ID in the history list.
+    const rawTemplateIds = [
+      ...(testSendRes.data ?? []).map((r) => r.template_id),
+      ...(apiRes.data ?? []).map((r) => r.template_id),
+    ];
+    const templateNameById = new Map<string, string>();
+    if (rawTemplateIds.length > 0) {
+      const { data: templateRows, error: templateError } = await supabase
+        .from("zalo_templates")
+        .select("template_id, template_name")
+        .in("template_id", [...new Set(rawTemplateIds)]);
+      if (templateError) throw templateError;
+      for (const row of templateRows ?? []) {
+        templateNameById.set(row.template_id, row.template_name);
+      }
+    }
+
     const entries: MessageLogEntry[] = [];
 
     for (const r of campaignRes.data ?? []) {
       const campaign = r.campaigns as unknown as {
         name: string;
-        zalo_templates: { template_name: string } | null;
+        zalo_templates: { template_name: string; template_id: string } | null;
       } | null;
       entries.push({
         id: r.id,
         source: "campaign",
         sourceLabel: campaign?.name ?? "Chiến dịch",
         templateLabel: campaign?.zalo_templates?.template_name ?? "—",
+        templateId: campaign?.zalo_templates?.template_id ?? "—",
         templateData: r.template_data as Record<string, unknown>,
         sendMode: r.send_mode,
         success: r.status === "sent",
@@ -81,7 +102,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
         id: r.id,
         source: "test_send",
         sourceLabel: "Gửi thử",
-        templateLabel: r.template_id,
+        templateLabel: templateNameById.get(r.template_id) ?? r.template_id,
+        templateId: r.template_id,
         templateData: r.template_data as Record<string, unknown>,
         sendMode: r.send_mode,
         success: r.success,
@@ -98,7 +120,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
         id: r.id,
         source: "api",
         sourceLabel: apiKey?.name ? `API: ${apiKey.name}` : "API ngoài",
-        templateLabel: r.template_id,
+        templateLabel: templateNameById.get(r.template_id) ?? r.template_id,
+        templateId: r.template_id,
         templateData: r.template_data as Record<string, unknown>,
         sendMode: r.send_mode,
         success: r.success,

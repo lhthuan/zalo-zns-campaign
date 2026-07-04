@@ -60,6 +60,7 @@ interface MessageLogEntry {
   source: "campaign" | "test_send" | "api";
   sourceLabel: string;
   templateLabel: string;
+  templateId: string;
   templateData: Record<string, unknown>;
   sendMode: string;
   success: boolean;
@@ -847,6 +848,10 @@ export default function CustomersPage() {
                   </div>
                   {expandedMessageId === m.id && (
                     <div className="mt-2 space-y-1 border-t pt-2 text-xs">
+                      <p>
+                        <span className="text-muted-foreground">{t("templateIdLabel")}</span>{" "}
+                        <span className="font-mono">{m.templateId}</span>
+                      </p>
                       <p>
                         <span className="text-muted-foreground">{t("params")}</span>{" "}
                         <span className="font-mono">{JSON.stringify(m.templateData)}</span>
