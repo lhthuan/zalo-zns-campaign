@@ -253,6 +253,9 @@ export const translations = {
       previous: "Trước",
       next: "Sau",
       pagePrefix: "Trang",
+      colContent: "Nội dung",
+      viewContent: "Xem nội dung",
+      hideContent: "Ẩn nội dung",
     },
     campaignDetail: {
       backToList: "Quay lại danh sách chiến dịch",
@@ -706,6 +709,9 @@ export const translations = {
       previous: "이전",
       next: "다음",
       pagePrefix: "페이지",
+      colContent: "내용",
+      viewContent: "내용 보기",
+      hideContent: "내용 숨기기",
     },
     campaignDetail: {
       backToList: "캠페인 목록으로 돌아가기",

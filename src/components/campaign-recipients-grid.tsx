@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "@/components/i18n-provider";
 
 interface RecipientRow {
+  id: string;
   phone: string | null;
   zalo_uid: string | null;
   send_mode: string;
@@ -30,6 +31,7 @@ interface RecipientRow {
   zalo_msg_id: string | null;
   error_code: string | null;
   error_message: string | null;
+  template_data: Record<string, string> | null;
   sent_at: string | null;
   created_at: string;
   customers: { name: string | null } | null;
@@ -58,6 +60,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
   const [filterSendMode, setFilterSendMode] = useState(ALL_MODE);
   const [sortColumn, setSortColumn] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const buildParams = useCallback(
     (targetPage: number) => {
@@ -169,6 +172,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                 {t("colSentAt")}
                 {sortColumn === "sent_at" && (sortDir === "asc" ? " ▲" : " ▼")}
               </TableHead>
+              <TableHead>{t("colContent")}</TableHead>
             </TableRow>
             <TableRow>
               <TableHead>
@@ -227,39 +231,68 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
               </TableHead>
               <TableHead />
               <TableHead />
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   {t("loading")}
                 </TableCell>
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   {t("noRows")}
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row, i) => {
+              rows.map((row) => {
                 const statusInfo = STATUS_LABEL[row.status] ?? { label: row.status, variant: "outline" as const };
+                const isExpanded = expandedId === row.id;
+                const dataEntries = Object.entries(row.template_data ?? {});
                 return (
-                  <TableRow key={i}>
-                    <TableCell>{row.phone ?? "—"}</TableCell>
-                    <TableCell>{row.customers?.name ?? "—"}</TableCell>
-                    <TableCell>{row.send_mode}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {row.error_message ? `${row.error_code ?? ""} ${row.error_message}` : "—"}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {row.sent_at ? new Date(row.sent_at).toLocaleString("vi-VN") : "—"}
-                    </TableCell>
-                  </TableRow>
+                  <Fragment key={row.id}>
+                    <TableRow>
+                      <TableCell>{row.phone ?? "—"}</TableCell>
+                      <TableCell>{row.customers?.name ?? "—"}</TableCell>
+                      <TableCell>{row.send_mode}</TableCell>
+                      <TableCell>
+                        <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {row.error_message ? `${row.error_code ?? ""} ${row.error_message}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {row.sent_at ? new Date(row.sent_at).toLocaleString("vi-VN") : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setExpandedId(isExpanded ? null : row.id)}
+                          disabled={dataEntries.length === 0}
+                        >
+                          {isExpanded ? t("hideContent") : t("viewContent")}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="bg-muted/30">
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1 py-1 text-xs sm:grid-cols-3">
+                            {dataEntries.map(([key, value]) => (
+                              <div key={key} className="flex items-baseline gap-2">
+                                <span className="shrink-0 font-mono text-muted-foreground">{key}:</span>
+                                <span className="font-medium break-words">{value || "—"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
                 );
               })
             )}

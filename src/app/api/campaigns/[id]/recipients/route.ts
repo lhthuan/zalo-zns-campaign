@@ -29,8 +29,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const sortDir = searchParams.get("dir") === "desc" ? false : true;
 
     const selectClause = filterName
-      ? "phone, zalo_uid, send_mode, status, zalo_msg_id, error_code, error_message, sent_at, created_at, customers!inner(name)"
-      : "phone, zalo_uid, send_mode, status, zalo_msg_id, error_code, error_message, sent_at, created_at, customers(name)";
+      ? "id, phone, zalo_uid, send_mode, status, zalo_msg_id, error_code, error_message, template_data, sent_at, created_at, customers!inner(name)"
+      : "id, phone, zalo_uid, send_mode, status, zalo_msg_id, error_code, error_message, template_data, sent_at, created_at, customers(name)";
 
     let query = supabase
       .from("campaign_recipients")
