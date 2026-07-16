@@ -147,6 +147,9 @@ create table public.campaign_recipients (
   customer_id uuid references public.customers(id) on delete set null,
   phone text, -- null khi snapshot từ khách hàng chỉ có Zalo UID (không có SĐT)
   zalo_uid text,
+  import_batch text, -- snapshot customers.import_batch (hoặc tên campaign, ở chế độ custom) tại thời
+                      -- điểm tạo recipient — vì customers.import_batch có thể bị lô sau ghi đè, cột
+                      -- này giữ lại đúng nguồn dữ liệu đã dùng để gửi campaign này
   template_data jsonb not null,
   send_mode text not null check (send_mode in ('uid','phone')),
   tracking_id text not null, -- bắt buộc theo API gửi tin qua SĐT; cũng sinh cho nhánh UID để đối soát nội bộ
@@ -161,6 +164,22 @@ create table public.campaign_recipients (
 create index idx_recipients_campaign on public.campaign_recipients (campaign_id);
 create index idx_recipients_campaign_batch on public.campaign_recipients (campaign_id, batch_number);
 create index idx_recipients_campaign_status on public.campaign_recipients (campaign_id, status);
+create index idx_recipients_import_batch on public.campaign_recipients (import_batch) where import_batch is not null;
+
+-- customers.import_batch chỉ lưu MỘT giá trị và bị ghi đè mỗi khi khách hàng đó
+-- xuất hiện lại ở một lần import/campaign custom khác — nên không thể dùng để
+-- tra "khách này từng thuộc những lô nào theo thời gian". Bảng này append-only:
+-- mỗi lần một khách hàng được insert/update qua import (trang import riêng hoặc
+-- campaign custom) đều ghi thêm 1 dòng ở đây, giữ lại toàn bộ lịch sử.
+create table public.customer_import_history (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  import_batch text not null,
+  imported_at timestamptz not null default now()
+);
+create index idx_customer_import_history_customer on public.customer_import_history (customer_id, imported_at desc);
+create index idx_customer_import_history_batch on public.customer_import_history (import_batch);
+alter table public.customer_import_history enable row level security;
 
 -- API keys for external systems (their own order system, POS, CRM...) to call
 -- POST /api/sendzns directly, without going through the dashboard. Only the

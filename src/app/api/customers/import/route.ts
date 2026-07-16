@@ -6,6 +6,7 @@ import {
   validateMappedCustomer,
   presentCustomerFields,
   groupRowsBySignature,
+  dedupeByContactKey,
   type MappedCustomerRow,
 } from "@/lib/spreadsheet/import";
 
@@ -60,19 +61,24 @@ export async function POST(request: NextRequest) {
     const body = bodySchema.parse(await request.json());
     const supabase = createAdminClient();
 
-    const withPhone: StampedRow[] = [];
-    const uidOnly: StampedRow[] = [];
     let rejected = 0;
-
+    const stampedRows: StampedRow[] = [];
     for (const row of body.rows) {
       if (validateMappedCustomer(row)) {
         rejected++;
         continue;
       }
-      const stamped: StampedRow = { ...row, import_batch: body.batch_name };
-      if (stamped.phone) withPhone.push(stamped);
-      else uidOnly.push(stamped);
+      stampedRows.push({ ...row, import_batch: body.batch_name });
     }
+    // Same contact (phone/zalo_uid) listed twice in one file must collapse to
+    // one row — otherwise it either duplicates the customer_group_members
+    // membership work harmlessly, or (worse) two rows with the same phone and
+    // the same optional-field signature land in one upsert() call and
+    // Postgres rejects the whole batch with "ON CONFLICT DO UPDATE command
+    // cannot affect row a second time".
+    const { rows: deduped, duplicateCount } = dedupeByContactKey(stampedRows);
+    const withPhone: StampedRow[] = deduped.filter((r) => r.phone);
+    const uidOnly: StampedRow[] = deduped.filter((r) => !r.phone);
 
     let imported = 0;
     // phone -> id and zalo_uid -> id, so group assignment (below) can find
@@ -159,7 +165,20 @@ export async function POST(request: NextRequest) {
       if (error) throw error;
     }
 
-    return NextResponse.json({ imported, totalRows: body.rows.length, rejected });
+    // Append-only trail of every batch that has ever touched each customer —
+    // see migration 013's comment for why customers.import_batch alone (a
+    // single column, overwritten on every re-import) can't answer that.
+    const touchedCustomerIds = [...new Set([...idByPhone.values(), ...idByUid.values()])];
+    if (touchedCustomerIds.length > 0) {
+      const historyRows = touchedCustomerIds.map((customer_id) => ({
+        customer_id,
+        import_batch: body.batch_name,
+      }));
+      const { error } = await supabase.from("customer_import_history").insert(historyRows);
+      if (error) throw error;
+    }
+
+    return NextResponse.json({ imported, totalRows: body.rows.length, rejected, duplicate: duplicateCount });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

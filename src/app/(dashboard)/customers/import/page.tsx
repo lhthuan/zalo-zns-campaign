@@ -142,6 +142,9 @@ export default function CustomersImportPage() {
       return;
     }
     toast.success(`Đã import ${json.imported}/${json.totalRows} dòng vào lô "${batchName.trim()}"`);
+    if (json.duplicate > 0) {
+      toast.warning(`Đã gộp ${json.duplicate} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
+    }
     router.push("/customers");
   }
 

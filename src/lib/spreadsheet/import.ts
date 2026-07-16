@@ -139,6 +139,61 @@ export function mapAndValidateCustomerRows(
   });
 }
 
+/** Any row we key a customer/recipient upsert by phone or Zalo UID. */
+export interface ContactKeyed {
+  phone?: string | null;
+  zalo_uid?: string | null;
+}
+
+export interface DedupeResult<T> {
+  rows: T[];
+  duplicateCount: number;
+}
+
+/**
+ * Collapses rows that share the same phone (or, when phone is absent, the same
+ * Zalo UID) down to their last occurrence in the file.
+ *
+ * Two reasons this must run before anything touches the DB:
+ * 1. Postgres's `INSERT ... ON CONFLICT (phone) DO UPDATE` throws "ON CONFLICT
+ *    DO UPDATE command cannot affect row a second time" the moment the same
+ *    conflict key appears twice in one statement — an unhandled duplicate
+ *    phone in the uploaded file would 500 the entire campaign/import request.
+ * 2. Even when two duplicate rows land in different upsert calls (no crash),
+ *    without this step both still turn into separate campaign_recipients rows
+ *    later — the same person gets the ZNS message sent to them twice.
+ * Last-occurrence-wins matches spreadsheet intuition: a later row for the same
+ * contact is treated as the corrected/more recent value.
+ */
+export function dedupeByContactKey<T extends ContactKeyed>(rows: T[]): DedupeResult<T> {
+  const indexByKey = new Map<string, number>();
+  const result: T[] = [];
+  for (const row of rows) {
+    const key = row.phone ? `p:${row.phone}` : row.zalo_uid ? `u:${row.zalo_uid}` : null;
+    if (key == null) {
+      result.push(row);
+      continue;
+    }
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex != null) {
+      result[existingIndex] = row;
+    } else {
+      indexByKey.set(key, result.length);
+      result.push(row);
+    }
+  }
+  return { rows: result, duplicateCount: rows.length - result.length };
+}
+
+/** A recipient row needs a phone or a Zalo UID to be sendable, and a phone
+ * (when present) must be a real VN mobile number — same rule enforced both
+ * for campaign recipients and for customer-import rows. */
+export function isImportableRecipient(r: { phone?: string; zalo_uid?: string }): boolean {
+  if (!r.phone && !r.zalo_uid) return false;
+  if (r.phone && !isValidVietnamesePhone(r.phone)) return false;
+  return true;
+}
+
 export interface CustomerUpsertFields {
   customer_code?: string;
   name?: string;

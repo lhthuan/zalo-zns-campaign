@@ -55,6 +55,12 @@ interface CustomerGroup {
   customer_count: number;
 }
 
+interface ImportHistoryEntry {
+  id: string;
+  import_batch: string;
+  imported_at: string;
+}
+
 interface MessageLogEntry {
   id: string;
   source: "campaign" | "test_send" | "api";
@@ -150,6 +156,7 @@ export default function CustomersPage() {
   const [messagesFor, setMessagesFor] = useState<Customer | null>(null);
   const [messages, setMessages] = useState<MessageLogEntry[] | null>(null);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[] | null>(null);
 
   const buildParams = useCallback(
     (page: number) => {
@@ -382,14 +389,20 @@ export default function CustomersPage() {
   async function openMessages(customer: Customer) {
     setMessagesFor(customer);
     setMessages(null);
+    setImportHistory(null);
     setExpandedMessageId(null);
-    const res = await fetch(`/api/customers/${customer.id}/messages`);
-    const json = await res.json();
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được lịch sử tin nhắn");
-      return;
+    const [messagesRes, historyRes] = await Promise.all([
+      fetch(`/api/customers/${customer.id}/messages`),
+      fetch(`/api/customers/${customer.id}/import-history`),
+    ]);
+    const messagesJson = await messagesRes.json();
+    if (!messagesRes.ok) {
+      toast.error(messagesJson.error ?? "Không tải được lịch sử tin nhắn");
+    } else {
+      setMessages(messagesJson.data ?? []);
     }
-    setMessages(json.data ?? []);
+    const historyJson = await historyRes.json();
+    if (historyRes.ok) setImportHistory(historyJson.data ?? []);
   }
 
   function openNew() {
@@ -822,6 +835,25 @@ export default function CustomersPage() {
               {t("messageHistoryTitle")} — {messagesFor?.name ?? messagesFor?.phone ?? t("customerFallback")}
             </DialogTitle>
           </DialogHeader>
+          <div className="space-y-1 border-b pb-3">
+            <p className="text-sm font-medium">{t("importHistoryTitle")}</p>
+            {importHistory == null ? (
+              <p className="text-xs text-muted-foreground">{tc("loading")}</p>
+            ) : importHistory.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("noImportHistory")}</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {importHistory.map((h) => (
+                  <Badge key={h.id} variant="outline" className="font-normal">
+                    {h.import_batch}
+                    <span className="ml-1 text-muted-foreground">
+                      · {t("importedAtLabel")} {new Date(h.imported_at).toLocaleDateString("vi-VN")}
+                    </span>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
           {messages == null ? (
             <p className="text-sm text-muted-foreground">{tc("loading")}</p>
           ) : messages.length === 0 ? (

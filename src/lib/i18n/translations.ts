@@ -147,6 +147,9 @@ export const translations = {
       params: "Tham số:",
       zaloMsgId: "Zalo Message ID:",
       errorLabel: "Lỗi",
+      importHistoryTitle: "Lịch sử nguồn nhập",
+      noImportHistory: "Chưa có dữ liệu import nào cho khách hàng này.",
+      importedAtLabel: "lúc",
     },
     customersImport: {
       title: "Import khách hàng từ file",
@@ -256,6 +259,7 @@ export const translations = {
       colContent: "Nội dung",
       viewContent: "Xem nội dung",
       hideContent: "Ẩn nội dung",
+      colSourceBatch: "Lô nguồn",
     },
     campaignDetail: {
       backToList: "Quay lại danh sách chiến dịch",
@@ -609,6 +613,9 @@ export const translations = {
       params: "파라미터:",
       zaloMsgId: "Zalo 메시지 ID:",
       errorLabel: "오류",
+      importHistoryTitle: "가져오기 출처 기록",
+      noImportHistory: "이 고객에 대한 가져오기 데이터가 없습니다.",
+      importedAtLabel: "시각",
     },
     customersImport: {
       title: "파일에서 고객 가져오기",
@@ -718,6 +725,7 @@ export const translations = {
       colContent: "내용",
       viewContent: "내용 보기",
       hideContent: "내용 숨기기",
+      colSourceBatch: "출처 배치",
     },
     campaignDetail: {
       backToList: "캠페인 목록으로 돌아가기",

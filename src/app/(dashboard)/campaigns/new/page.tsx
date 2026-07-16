@@ -397,6 +397,9 @@ function NewCampaignForm() {
     if (json.rejectedRows > 0) {
       toast.warning(`Đã loại ${json.rejectedRows} dòng lỗi (thiếu SĐT/UID hoặc SĐT không hợp lệ)`);
     }
+    if (json.duplicateRows > 0) {
+      toast.warning(`Đã gộp ${json.duplicateRows} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
+    }
     toast.success("Đã tạo chiến dịch nháp");
     router.push(`/campaigns/${json.id}`);
   }

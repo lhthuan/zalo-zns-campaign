@@ -7,9 +7,10 @@ import {
   parseSpreadsheet,
   mapRowsToRecipients,
   groupRowsBySignature,
+  dedupeByContactKey,
+  isImportableRecipient,
   type ColumnMapping,
 } from "@/lib/spreadsheet/import";
-import { isValidVietnamesePhone } from "@/lib/phone";
 import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 
 const mappingSchema = z.object({
@@ -35,6 +36,10 @@ interface RecipientBase {
   zalo_uid: string | null;
   customer_id: string | null;
   template_data: Record<string, string>;
+  // Snapshot of customers.import_batch (or the campaign name, in custom mode)
+  // at creation time — see migration 012's comment for why this can't just be
+  // read back off `customers` later.
+  import_batch: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -88,6 +93,7 @@ export async function POST(request: NextRequest) {
     let customerGroupIdForRow: string | null = null;
     let fixedTemplateDataForRow: Record<string, string> | null = null;
     let rejectedRows = 0;
+    let duplicateRows = 0;
 
     if (mode === "broadcast") {
       const customerBatchRaw = formData.get("customer_batch");
@@ -103,7 +109,8 @@ export async function POST(request: NextRequest) {
           ? customerBatchRaw
           : null;
 
-      let customers: { id: string; phone: string | null; zalo_uid: string | null }[] | null;
+      type BroadcastCustomer = { id: string; phone: string | null; zalo_uid: string | null; import_batch: string | null };
+      let customers: BroadcastCustomer[] | null;
       let sourceLabel: string;
       if (groupId) {
         const { data: group, error: groupError } = await supabase
@@ -116,15 +123,15 @@ export async function POST(request: NextRequest) {
         }
         const { data: members, error } = await supabase
           .from("customer_group_members")
-          .select("customers(id, phone, zalo_uid)")
+          .select("customers(id, phone, zalo_uid, import_batch)")
           .eq("group_id", groupId);
         if (error) throw error;
         customers = (members ?? [])
-          .map((m) => m.customers as unknown as { id: string; phone: string | null; zalo_uid: string | null } | null)
-          .filter((c): c is { id: string; phone: string | null; zalo_uid: string | null } => c != null);
+          .map((m) => m.customers as unknown as BroadcastCustomer | null)
+          .filter((c): c is BroadcastCustomer => c != null);
         sourceLabel = `Nhóm: ${group.name}`;
       } else {
-        let query = supabase.from("customers").select("id, phone, zalo_uid");
+        let query = supabase.from("customers").select("id, phone, zalo_uid, import_batch");
         if (batchLabel) query = query.eq("import_batch", batchLabel);
         const { data, error } = await query;
         if (error) throw error;
@@ -140,6 +147,7 @@ export async function POST(request: NextRequest) {
         zalo_uid: c.zalo_uid,
         customer_id: c.id,
         template_data: fixedTemplateData,
+        import_batch: c.import_batch,
       }));
       sourceFileName = sourceLabel;
       customerBatchForRow = batchLabel;
@@ -156,12 +164,10 @@ export async function POST(request: NextRequest) {
       const buffer = await file.arrayBuffer();
       const rows = parseSpreadsheet(buffer);
       const allRows = mapRowsToRecipients(rows, mapping);
-      const imported = allRows.filter((r) => {
-        if (!r.phone && !r.zalo_uid) return false;
-        if (r.phone && !isValidVietnamesePhone(r.phone)) return false;
-        return true;
-      });
-      rejectedRows = allRows.length - imported.length;
+      const validRows = allRows.filter(isImportableRecipient);
+      const { rows: imported, duplicateCount } = dedupeByContactKey(validRows);
+      rejectedRows = allRows.length - validRows.length;
+      duplicateRows = duplicateCount;
 
       if (imported.length === 0) {
         return NextResponse.json(
@@ -264,9 +270,21 @@ export async function POST(request: NextRequest) {
           zalo_uid: zaloUid,
           customer_id: byPhone?.id ?? byUid?.id ?? null,
           template_data: r.template_data,
+          import_batch: name.trim(),
         };
       });
       sourceFileName = file.name;
+
+      // Append-only trail of every batch that has ever touched each customer —
+      // see migration 013's comment for why customers.import_batch alone (a
+      // single column, overwritten on every re-import) can't answer that.
+      const historyRows = [...new Set(recipientsBase.map((r) => r.customer_id).filter((id): id is string => id != null))].map(
+        (customer_id) => ({ customer_id, import_batch: name.trim() })
+      );
+      if (historyRows.length > 0) {
+        const { error } = await supabase.from("customer_import_history").insert(historyRows);
+        if (error) throw error;
+      }
     }
 
     const { data: campaign, error: campaignError } = await supabase
@@ -292,6 +310,7 @@ export async function POST(request: NextRequest) {
       phone: r.phone,
       zalo_uid: r.zalo_uid,
       template_data: r.template_data,
+      import_batch: r.import_batch,
       send_mode: (r.zalo_uid ? "uid" : "phone") as "uid" | "phone",
       tracking_id: crypto.randomBytes(16).toString("hex"),
       batch_number: Math.floor(index / 100) + 1,
@@ -311,7 +330,7 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json(
-      { id: campaign.id, totalRecipients: recipientsBase.length, byMode, rejectedRows },
+      { id: campaign.id, totalRecipients: recipientsBase.length, byMode, rejectedRows, duplicateRows },
       { status: 201 }
     );
   } catch (err) {

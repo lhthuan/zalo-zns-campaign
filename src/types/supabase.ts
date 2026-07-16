@@ -178,6 +178,7 @@ export interface Database {
           customer_id: string | null;
           phone: string | null;
           zalo_uid: string | null;
+          import_batch: string | null;
           template_data: Record<string, unknown>;
           send_mode: SendMode;
           tracking_id: string;
@@ -195,6 +196,7 @@ export interface Database {
           customer_id?: string | null;
           phone?: string | null;
           zalo_uid?: string | null;
+          import_batch?: string | null;
           template_data: Record<string, unknown>;
           send_mode: SendMode;
           tracking_id: string;
@@ -378,6 +380,30 @@ export interface Database {
           },
           {
             foreignKeyName: "customer_group_members_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_import_history: {
+        Row: {
+          id: string;
+          customer_id: string;
+          import_batch: string;
+          imported_at: string;
+        };
+        Insert: {
+          id?: string;
+          customer_id: string;
+          import_batch: string;
+          imported_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["customer_import_history"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "customer_import_history_customer_id_fkey";
             columns: ["customer_id"];
             isOneToOne: false;
             referencedRelation: "customers";

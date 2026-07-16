@@ -26,6 +26,7 @@ interface RecipientRow {
   id: string;
   phone: string | null;
   zalo_uid: string | null;
+  import_batch: string | null;
   send_mode: string;
   status: string;
   zalo_msg_id: string | null;
@@ -272,7 +273,6 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                           variant="ghost"
                           size="sm"
                           onClick={() => setExpandedId(isExpanded ? null : row.id)}
-                          disabled={dataEntries.length === 0}
                         >
                           {isExpanded ? t("hideContent") : t("viewContent")}
                         </Button>
@@ -282,6 +282,10 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                       <TableRow>
                         <TableCell colSpan={7} className="bg-muted/30">
                           <div className="grid grid-cols-2 gap-x-6 gap-y-1 py-1 text-xs sm:grid-cols-3">
+                            <div className="flex items-baseline gap-2">
+                              <span className="shrink-0 font-mono text-muted-foreground">{t("colSourceBatch")}:</span>
+                              <span className="font-medium break-words">{row.import_batch || "—"}</span>
+                            </div>
                             {dataEntries.map(([key, value]) => (
                               <div key={key} className="flex items-baseline gap-2">
                                 <span className="shrink-0 font-mono text-muted-foreground">{key}:</span>
