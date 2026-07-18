@@ -5,14 +5,32 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { sendPhoneTemplate, sendUidTemplate, tryExtractUid } from "@/lib/zalo/api";
 import { describeZaloError } from "@/lib/zalo/errorCodes";
-import { mapWithConcurrency } from "@/lib/concurrency";
+import { toCanonicalZnsPhone } from "@/lib/phone";
 import type { ZaloPhoneSendResult, ZaloUidSendResult } from "@/types/domain";
+import type { Database } from "@/types/supabase";
 
-const requestSchema = z.object({
-  template_id: z.string(),
-  customer_ids: z.array(z.string()).min(1).max(20),
-  template_data: z.record(z.string(), z.string()),
-});
+// Contacts created here (manual entry, not yet in the directory) are tagged
+// with this label — same `customers.import_batch` field bulk imports use, so
+// they show up consistently in "Lô" filters and customer_import_history.
+const MANUAL_ENTRY_BATCH_LABEL = "Gửi lẻ ZNS";
+
+const requestSchema = z
+  .object({
+    template_id: z.string(),
+    template_data: z.record(z.string(), z.string()),
+    customer_id: z.string().optional(),
+    manual: z
+      .object({
+        name: z.string().trim().optional(),
+        phone: z.string(),
+      })
+      .optional(),
+  })
+  .refine((v) => Boolean(v.customer_id) !== Boolean(v.manual), {
+    message: "Cần chọn đúng 1 người nhận: từ danh bạ hoặc nhập thủ công",
+  });
+
+type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,19 +48,75 @@ export async function POST(request: NextRequest) {
     }
     const tpl = template;
 
-    const { data: customers, error: customersError } = await supabase
-      .from("customers")
-      .select("*")
-      .in("id", body.customer_ids);
-    if (customersError) throw customersError;
-    if (!customers || customers.length === 0) {
-      return NextResponse.json({ error: "No customers found" }, { status: 404 });
+    let customer: CustomerRow;
+
+    if (body.customer_id) {
+      const { data, error } = await supabase
+        .from("customers")
+        .select("*")
+        .eq("id", body.customer_id)
+        .single();
+      if (error || !data) {
+        return NextResponse.json({ error: "Không tìm thấy khách hàng" }, { status: 404 });
+      }
+      customer = data;
+    } else {
+      const canonicalPhone = toCanonicalZnsPhone(body.manual!.phone);
+      if (!canonicalPhone) {
+        return NextResponse.json({ error: "Số điện thoại không hợp lệ" }, { status: 400 });
+      }
+
+      const { data: existing, error: findError } = await supabase
+        .from("customers")
+        .select("*")
+        .eq("phone", canonicalPhone)
+        .maybeSingle();
+      if (findError) throw findError;
+
+      if (existing) {
+        // Don't clobber a name already on file with a blank/different manual
+        // entry — only fill it in when the existing record has none yet.
+        if (!existing.name && body.manual!.name) {
+          const { data: updated, error: updateError } = await supabase
+            .from("customers")
+            .update({ name: body.manual!.name })
+            .eq("id", existing.id)
+            .select("*")
+            .single();
+          if (updateError) throw updateError;
+          customer = updated;
+        } else {
+          customer = existing;
+        }
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from("customers")
+          .insert({
+            name: body.manual!.name || null,
+            phone: canonicalPhone,
+            import_batch: MANUAL_ENTRY_BATCH_LABEL,
+          })
+          .select("*")
+          .single();
+        if (insertError) throw insertError;
+        customer = inserted;
+
+        const { error: historyError } = await supabase
+          .from("customer_import_history")
+          .insert({ customer_id: inserted.id, import_batch: MANUAL_ENTRY_BATCH_LABEL });
+        if (historyError) throw historyError;
+      }
     }
-    const customerList = customers;
+
+    const sendMode: "uid" | "phone" = customer.zalo_uid ? "uid" : "phone";
+    if (sendMode === "phone" && !customer.phone) {
+      return NextResponse.json(
+        { error: "Khách hàng không có SĐT lẫn Zalo UID — không gửi được." },
+        { status: 400 }
+      );
+    }
 
     async function logAndReturn(
-      customer: (typeof customerList)[number],
-      sendMode: "uid" | "phone",
       success: boolean,
       zaloMsgId: string | null,
       errorCode: string | null,
@@ -73,61 +147,46 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const results = await mapWithConcurrency(customerList, 5, async (customer) => {
-      const sendMode: "uid" | "phone" = customer.zalo_uid ? "uid" : "phone";
-      if (sendMode === "phone" && !customer.phone) {
-        return logAndReturn(
-          customer,
-          sendMode,
-          false,
-          null,
-          null,
-          "Khách hàng không có SĐT lẫn Zalo UID — không gửi được."
-        );
+    try {
+      let result: ZaloUidSendResult | ZaloPhoneSendResult;
+      let msgId: string | undefined;
+
+      if (sendMode === "uid") {
+        result = await sendUidTemplate({
+          userId: customer.zalo_uid!,
+          templateId: tpl.template_id,
+          templateData: body.template_data,
+        });
+        msgId = (result as ZaloUidSendResult).data?.message_id;
+      } else {
+        result = await sendPhoneTemplate({
+          phone: customer.phone!,
+          templateId: tpl.template_id,
+          templateData: body.template_data,
+          trackingId: crypto.randomBytes(16).toString("hex"),
+        });
+        msgId = (result as ZaloPhoneSendResult).data?.msg_id;
       }
-      try {
-        let result: ZaloUidSendResult | ZaloPhoneSendResult;
-        let msgId: string | undefined;
 
-        if (sendMode === "uid") {
-          result = await sendUidTemplate({
-            userId: customer.zalo_uid!,
-            templateId: tpl.template_id,
-            templateData: body.template_data,
-          });
-          msgId = (result as ZaloUidSendResult).data?.message_id;
-        } else {
-          result = await sendPhoneTemplate({
-            phone: customer.phone!,
-            templateId: tpl.template_id,
-            templateData: body.template_data,
-            trackingId: crypto.randomBytes(16).toString("hex"),
-          });
-          msgId = (result as ZaloPhoneSendResult).data?.msg_id;
+      const success = result.error === 0;
+      if (success) {
+        const uid = tryExtractUid(result);
+        if (uid && uid !== customer.zalo_uid) {
+          await supabase.from("customers").update({ zalo_uid: uid }).eq("id", customer.id);
         }
-
-        const success = result.error === 0;
-        if (success) {
-          const uid = tryExtractUid(result);
-          if (uid && uid !== customer.zalo_uid) {
-            await supabase.from("customers").update({ zalo_uid: uid }).eq("id", customer.id);
-          }
-        }
-
-        return logAndReturn(
-          customer,
-          sendMode,
-          success,
-          msgId ?? null,
-          success ? null : String(result.error),
-          success ? null : describeZaloError(result.error, result.message)
-        );
-      } catch (err) {
-        return logAndReturn(customer, sendMode, false, null, null, (err as Error).message);
       }
-    });
 
-    return NextResponse.json({ results });
+      const resultOut = await logAndReturn(
+        success,
+        msgId ?? null,
+        success ? null : String(result.error),
+        success ? null : describeZaloError(result.error, result.message)
+      );
+      return NextResponse.json({ result: resultOut });
+    } catch (err) {
+      const resultOut = await logAndReturn(false, null, null, (err as Error).message);
+      return NextResponse.json({ result: resultOut });
+    }
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

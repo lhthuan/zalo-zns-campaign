@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -22,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isValidVietnamesePhone } from "@/lib/phone";
 import { useTranslation } from "@/components/i18n-provider";
 
 interface ZaloTemplateParam {
@@ -59,13 +61,18 @@ interface SendResult {
   errorMessage: string | null;
 }
 
+type RecipientMode = "directory" | "manual";
+
 export default function SendTestPage() {
   const { t } = useTranslation("sendTest");
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
+  const [recipientMode, setRecipientMode] = useState<RecipientMode>("directory");
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Customer[]>([]);
-  const [selected, setSelected] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [manualName, setManualName] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
@@ -97,7 +104,10 @@ export default function SendTestPage() {
   const selectedTemplate = templates.find((tpl) => tpl.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
   const templateItems = Object.fromEntries(templates.map((tpl) => [tpl.id, tpl.template_name]));
-  const selectedIds = new Set(selected.map((c) => c.id));
+
+  const recipientName = recipientMode === "directory" ? selectedCustomer?.name ?? null : manualName.trim() || null;
+  const recipientPhone =
+    recipientMode === "directory" ? selectedCustomer?.phone ?? null : manualPhone.trim() || null;
 
   useEffect(() => {
     if (!selectedTemplate?.preview_url) {
@@ -123,22 +133,23 @@ export default function SendTestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate?.template_id, selectedTemplate?.preview_url, JSON.stringify(paramValues)]);
 
-  function addCustomer(c: Customer) {
-    if (selectedIds.has(c.id)) return;
-    setSelected((prev) => [...prev, c]);
-  }
-
-  function removeCustomer(id: string) {
-    setSelected((prev) => prev.filter((c) => c.id !== id));
-  }
-
   async function handleSend() {
     if (!templateId) return toast.error("Chọn template");
-    if (selected.length === 0) return toast.error("Chọn ít nhất 1 khách hàng");
 
     const missingRequired = params.filter((p) => p.require && !paramValues[p.name]);
     if (missingRequired.length > 0) {
       return toast.error(`Chưa điền tham số bắt buộc: ${missingRequired.map((p) => p.name).join(", ")}`);
+    }
+
+    let recipientPayload: Record<string, unknown>;
+    if (recipientMode === "directory") {
+      if (!selectedCustomer) return toast.error("Chọn 1 khách hàng từ danh bạ");
+      recipientPayload = { customer_id: selectedCustomer.id };
+    } else {
+      const phone = manualPhone.trim();
+      if (!phone) return toast.error("Nhập số điện thoại");
+      if (!isValidVietnamesePhone(phone)) return toast.error(t("manualPhoneInvalid"));
+      recipientPayload = { manual: { name: manualName.trim() || undefined, phone } };
     }
 
     setSending(true);
@@ -148,8 +159,8 @@ export default function SendTestPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         template_id: templateId,
-        customer_ids: selected.map((c) => c.id),
         template_data: paramValues,
+        ...recipientPayload,
       }),
     });
     const json = await res.json();
@@ -159,9 +170,13 @@ export default function SendTestPage() {
       toast.error(json.error ? JSON.stringify(json.error) : "Gửi thất bại");
       return;
     }
-    setResults(json.results);
-    const successCount = json.results.filter((r: SendResult) => r.success).length;
-    toast.success(`Đã gửi ${successCount}/${json.results.length} thành công`);
+    const result: SendResult = json.result;
+    setResults([result]);
+    if (result.success) {
+      toast.success(t("success"));
+    } else {
+      toast.error(`${t("failed")}: ${result.errorMessage ?? ""}`);
+    }
   }
 
   return (
@@ -216,60 +231,78 @@ export default function SendTestPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>
-              {t("step2")} ({selected.length} {t("selected")})
-            </CardTitle>
+            <CardTitle>{t("step2")}</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {selected.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {selected.map((c) => (
-                  <Badge key={c.id} variant="secondary" className="gap-1 py-1 pr-1 pl-2 text-sm">
-                    {c.name ?? c.phone ?? c.zalo_uid}
+          <CardContent>
+            <Tabs
+              value={recipientMode}
+              onValueChange={(v) => setRecipientMode((v as RecipientMode) ?? "directory")}
+            >
+              <TabsList>
+                <TabsTrigger value="directory">{t("modeDirectory")}</TabsTrigger>
+                <TabsTrigger value="manual">{t("modeManual")}</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="directory" className="space-y-3 pt-3">
+                {selectedCustomer && (
+                  <Badge variant="secondary" className="gap-1 py-1 pr-1 pl-2 text-sm">
+                    {selectedCustomer.name ?? selectedCustomer.phone ?? selectedCustomer.zalo_uid}
                     <button
                       type="button"
-                      onClick={() => removeCustomer(c.id)}
+                      onClick={() => setSelectedCustomer(null)}
                       className="ml-1 rounded-full px-1 hover:bg-black/10"
-                      aria-label={`${t("deselect")} ${c.name ?? c.phone ?? ""}`}
+                      aria-label={`${t("clear")} ${selectedCustomer.name ?? ""}`}
                     >
                       ×
                     </button>
                   </Badge>
-                ))}
-              </div>
-            )}
+                )}
 
-            <Input
-              placeholder={t("searchPlaceholder")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+                <Input
+                  placeholder={t("searchPlaceholder")}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
 
-            {searchResults.length > 0 && (
-              <div className="max-h-64 overflow-y-auto rounded-md border">
-                <Table>
-                  <TableBody>
-                    {searchResults.map((c) => {
-                      const already = selectedIds.has(c.id);
-                      return (
-                        <TableRow
-                          key={c.id}
-                          className={already ? "opacity-50" : "cursor-pointer"}
-                          onClick={() => addCustomer(c)}
-                        >
-                          <TableCell>{c.name ?? "—"}</TableCell>
-                          <TableCell>{c.phone ?? "—"}</TableCell>
-                          <TableCell className="text-muted-foreground">{c.zalo_uid ?? "—"}</TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
-                            {already ? t("already") : t("add")}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+                {searchResults.length > 0 && (
+                  <div className="max-h-64 overflow-y-auto rounded-md border">
+                    <Table>
+                      <TableBody>
+                        {searchResults.map((c) => {
+                          const already = selectedCustomer?.id === c.id;
+                          return (
+                            <TableRow
+                              key={c.id}
+                              className={already ? "opacity-50" : "cursor-pointer"}
+                              onClick={() => setSelectedCustomer(c)}
+                            >
+                              <TableCell>{c.name ?? "—"}</TableCell>
+                              <TableCell>{c.phone ?? "—"}</TableCell>
+                              <TableCell className="text-muted-foreground">{c.zalo_uid ?? "—"}</TableCell>
+                              <TableCell className="text-right text-xs text-muted-foreground">
+                                {already ? t("already") : t("choose")}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="manual" className="space-y-3 pt-3">
+                <div className="space-y-1">
+                  <Label>{t("manualNameLabel")}</Label>
+                  <Input value={manualName} onChange={(e) => setManualName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label>{t("manualPhoneLabel")}</Label>
+                  <Input value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">{t("manualPhoneHint")}</p>
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 
@@ -329,23 +362,13 @@ export default function SendTestPage() {
                 <p className="font-medium">{selectedTemplate.template_name}</p>
 
                 <div className="rounded-md border bg-muted/30 p-2 text-xs">
-                  {selected.length === 0 ? (
-                    <span className="text-muted-foreground">{t("previewNoCustomer")}</span>
+                  {!recipientName && !recipientPhone ? (
+                    <span className="text-muted-foreground">{t("previewNoRecipient")}</span>
                   ) : (
-                    <div className="space-y-1">
-                      <p className="text-muted-foreground">
-                        {t("previewSendTo")} {selected.length} {t("previewCustomersUnit")}
-                      </p>
-                      {selected.slice(0, 5).map((c) => (
-                        <p key={c.id}>
-                          {c.name ?? "—"}
-                          {c.phone && <span className="text-muted-foreground"> · {c.phone}</span>}
-                        </p>
-                      ))}
-                      {selected.length > 5 && (
-                        <p className="text-muted-foreground">… +{selected.length - 5}</p>
-                      )}
-                    </div>
+                    <p>
+                      {t("previewSendTo")}: {recipientName ?? "—"}
+                      {recipientPhone && <span className="text-muted-foreground"> · {recipientPhone}</span>}
+                    </p>
                   )}
                 </div>
 
