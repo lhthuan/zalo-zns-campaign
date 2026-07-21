@@ -8,6 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
 import { useTranslation } from "@/components/i18n-provider";
 
@@ -29,6 +37,23 @@ interface PreviewRow {
   template_data: Record<string, string>;
 }
 
+interface QStashEventRow {
+  time: number;
+  messageId: string;
+  state: string;
+  responseStatus: number | null;
+  batchNumber: number | null;
+}
+
+const QSTASH_STATE_VARIANT: Record<string, "success" | "warning" | "destructive" | "outline"> = {
+  DELIVERED: "success",
+  CREATED: "outline",
+  ACTIVE: "outline",
+  RETRY: "warning",
+  ERROR: "destructive",
+  FAILED: "destructive",
+};
+
 const ACTIVE_STATUSES = new Set(["sending"]);
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,6 +68,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [qstashOpen, setQstashOpen] = useState(false);
+  const [qstashLoading, setQstashLoading] = useState(false);
+  const [qstashLog, setQstashLog] = useState<QStashEventRow[] | null>(null);
 
   const load = useCallback(async () => {
     const [campaignRes, previewRes] = await Promise.all([
@@ -66,6 +94,24 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, [campaign, load]);
+
+  async function loadQstashLog() {
+    setQstashLoading(true);
+    const res = await fetch(`/api/campaigns/${id}/qstash-log`);
+    const json = await res.json();
+    setQstashLoading(false);
+    if (!res.ok) {
+      toast.error(json.error ?? t("qstashLoadFailed"));
+      return;
+    }
+    setQstashLog(json.data ?? []);
+  }
+
+  function toggleQstashLog() {
+    const next = !qstashOpen;
+    setQstashOpen(next);
+    if (next && qstashLog == null) loadQstashLog();
+  }
 
   async function handleToggleHidden() {
     if (!campaign) return;
@@ -113,6 +159,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       return;
     }
     toast.success(`${t("sendStarted")} (${json.batches} ${t("batches")})`);
+    if (json.failedBatches?.length > 0) {
+      toast.warning(`${t("enqueueFailedWarning")}: ${json.failedBatches.join(", ")}`);
+    }
     load();
   }
 
@@ -124,6 +173,16 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       : 0;
 
   const remaining = Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count);
+
+  const latestQstashByBatch = qstashLog
+    ? Object.values(
+        qstashLog.reduce<Record<number, QStashEventRow>>((acc, e) => {
+          if (e.batchNumber == null) return acc;
+          if (!acc[e.batchNumber] || acc[e.batchNumber].time < e.time) acc[e.batchNumber] = e;
+          return acc;
+        }, {})
+      ).sort((a, b) => (a.batchNumber ?? 0) - (b.batchNumber ?? 0))
+    : [];
 
   return (
     <div className="space-y-4">
@@ -222,6 +281,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 {sending ? t("starting") : t("sendCampaign")}
               </Button>
             )}
+            {campaign.status === "sending" && remaining > 0 && (
+              <Button onClick={handleSend} disabled={sending} variant="outline">
+                {sending ? t("starting") : t("resumeSend")}
+              </Button>
+            )}
             {["completed", "completed_with_errors", "failed"].includes(campaign.status) && (
               <Button variant="outline" render={<Link href={`/campaigns/${id}/report`} />}>
                 {t("viewReport")}
@@ -229,6 +293,54 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             )}
           </div>
         </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>{t("qstashLogTitle")}</CardTitle>
+            <Button variant="outline" size="sm" onClick={toggleQstashLog}>
+              {qstashOpen ? t("hideContent") : t("viewContent")}
+            </Button>
+          </div>
+        </CardHeader>
+        {qstashOpen && (
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">{t("qstashLogHint")}</p>
+            {qstashLoading ? (
+              <p className="text-sm text-muted-foreground">{t("loading")}</p>
+            ) : !latestQstashByBatch.length ? (
+              <p className="text-sm text-muted-foreground">{t("qstashLogEmpty")}</p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("qstashColBatch")}</TableHead>
+                      <TableHead>{t("qstashColState")}</TableHead>
+                      <TableHead>{t("qstashColHttp")}</TableHead>
+                      <TableHead>{t("qstashColTime")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {latestQstashByBatch.map((e) => (
+                      <TableRow key={e.batchNumber}>
+                        <TableCell>{e.batchNumber}</TableCell>
+                        <TableCell>
+                          <Badge variant={QSTASH_STATE_VARIANT[e.state] ?? "outline"}>{e.state}</Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{e.responseStatus ?? "—"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(e.time).toLocaleString("vi-VN")}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        )}
       </Card>
 
       <Card>

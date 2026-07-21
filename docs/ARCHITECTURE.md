@@ -4,7 +4,7 @@
 > vấn đề đã phát hiện/sửa, để các lần làm việc sau (người hoặc Claude) đọc lại
 > nhanh chóng nắm bối cảnh trước khi sửa bug — không cần dò lại từ đầu.
 >
-> Cập nhật lần cuối: 2026-07-16.
+> Cập nhật lần cuối: 2026-07-21.
 
 ## 1. Tổng quan
 
@@ -69,11 +69,23 @@ Response trả về `{ id, totalRecipients, byMode, rejectedRows, duplicateRows 
 trùng phone/uid trong file (cả hai đều hiện toast cảnh báo ở frontend).
 
 ### 3.3 Gửi thực tế
-`POST /api/campaigns/[id]/send` → set `status='sending'`, enqueue 1 job QStash
-cho mỗi `batch_number` (100 recipient/batch) → `POST /api/campaigns/[id]/process-batch`
-(webhook có ký QStash) gửi tối đa 8 request song song
-(`mapWithConcurrency`, `SEND_CONCURRENCY=8`) qua Zalo API, ghi kết quả vào
-từng `campaign_recipients` row, và cập nhật `campaigns.status` khi hết pending.
+`POST /api/campaigns/[id]/send` ([route.ts](../src/app/api/campaigns/[id]/send/route.ts))
+→ set `status='sending'`, fetch toàn bộ `batch_number` còn `status='pending'`
+(phân trang qua `fetchAllRows` — xem mục 10), enqueue 1 job QStash cho mỗi
+batch (100 recipient/batch, throttle tối đa 5 đồng thời + retry 3 lần —
+`ENQUEUE_CONCURRENCY`/`ENQUEUE_MAX_ATTEMPTS`) → `POST
+/api/campaigns/[id]/process-batch` (webhook có ký QStash) gửi tối đa 8
+request song song (`mapWithConcurrency`, `SEND_CONCURRENCY=8`) qua Zalo API,
+ghi kết quả vào từng `campaign_recipients` row, và cập nhật `campaigns.status`
+khi hết pending.
+
+Route này **idempotent/resumable theo thiết kế**: cho phép gọi lại khi
+`status='sending'` (không chỉ `'draft'`), vì chỉ enqueue batch nào còn
+recipient `pending` — gọi lại nhiều lần là an toàn, đây chính là cơ chế nút
+"Gửi tiếp" trên trang chi tiết campaign khi có batch bị bỏ sót (xem mục 10).
+Log delivery thực tế của từng batch trên QStash xem được qua `GET
+/api/campaigns/[id]/qstash-log` ([events.ts](../src/lib/qstash/events.ts)) —
+hiển thị ở Card "Nhật ký hàng đợi (QStash)" trên trang chi tiết campaign.
 
 ## 4. Luồng import khách hàng riêng (không qua campaign)
 
@@ -126,7 +138,33 @@ rủi ro bằng cách: chỉ đọc raw cell value (không xử lý style/formul
 `readCell()` với whitelist tường minh, chặn `__proto__`/`constructor`/`prototype`
 làm tên cột. Xem comment đầu file `import.ts`.
 
-## 8. Testing
+## 8. Gotcha: PostgREST mặc định giới hạn 1000 dòng mỗi query
+
+Một `.select()` trần (không `.range()`/`.limit()`) qua Supabase/PostgREST chỉ
+trả về **tối đa 1000 dòng đầu tiên** — **im lặng**, không báo lỗi, không có
+cờ "đã bị cắt bớt". Đây là nguyên nhân gốc của bug "campaign 2993 người chỉ
+gửi đúng 1000 rồi dừng" (2026-07-21, xem mục 10): truy vấn lấy danh sách
+`batch_number` cần enqueue trong `send/route.ts` không phân trang, nên với
+campaign >1000 recipient (>10 batch) chỉ bao giờ enqueue đúng 10 batch đầu —
+không phải do quota QStash hay Zalo như tưởng ban đầu.
+
+Đã tìm thấy **3 chỗ** có cùng pattern nguy hiểm này (2 chỗ còn lại thậm chí
+nguy hiểm hơn vì hoàn toàn không có triệu chứng — campaign chỉ đơn giản có ít
+người nhận hơn thực tế, không "kẹt" rõ ràng như send):
+1. `send/route.ts` — lấy `batch_number` cần enqueue.
+2. `campaigns/route.ts` (broadcast, chọn nhóm) — lấy `customers` qua
+   `customer_group_members`.
+3. `campaigns/route.ts` (broadcast, chọn "Tất cả"/theo lô) — lấy `customers`.
+
+Cả 3 đã sửa bằng helper dùng chung
+[`fetchAllRows()`](../src/lib/supabase/pagination.ts) — phân trang tự động
+theo `.range()` cho đến khi trang trả về ít hơn page size. **Quy tắc**: bất
+kỳ `.select()` nào có thể trả về hơn 1000 dòng (không phải `.single()`,
+không phải truy vấn có `.limit()` tường minh nhỏ hơn 1000, không phải
+`count-only` với `head: true`) đều phải đi qua `fetchAllRows()` thay vì gọi
+trực tiếp.
+
+## 9. Testing
 
 `npx vitest run` — test ở [`src/lib/spreadsheet/import.test.ts`](../src/lib/spreadsheet/import.test.ts),
 dựng file `.xlsx` thật bằng chính thư viện `xlsx` (không mock) rồi chạy qua
@@ -137,7 +175,34 @@ SĐT sai định dạng. `vitest.config.ts` map alias `@/*` → `./src` (giống
 `tsconfig.json`) vì trước đây project chưa có config vitest dù đã có sẵn
 devDependency.
 
-## 9. Lịch sử vấn đề đã phát hiện & sửa
+## 10. Lịch sử vấn đề đã phát hiện & sửa
+
+### 2026-07-21 — Campaign lớn bị "kẹt" đúng ở 1000 người gửi
+
+Người dùng báo cáo campaign 2993 người nhận chỉ gửi được đúng 1000 (882
+thành công + 118 lỗi) rồi dừng hẳn, còn 1993 người vẫn "pending" mãi mãi,
+không một lỗi nào. Giả thuyết ban đầu (giới hạn 1.000 tin/ngày của gói Free
+QStash, hoặc giới hạn "max parallelism: 10" khi bắn 30 batch cùng lúc qua
+`Promise.all`) **đều sai** — xác nhận bằng cách gọi thẳng QStash Events API:
+batch 1-10 có đủ `CREATED→ACTIVE→DELIVERED`, batch 11-30 **không hề có bản
+ghi nào** (chưa từng được thử enqueue, không phải bị từ chối).
+
+Nguyên nhân thật: xem mục 8 — truy vấn `batch_number` trong `send/route.ts`
+bị PostgREST cắt ở 1000 dòng, nên với campaign này chỉ có batch 1-10 (=1000
+recipient đầu) từng được đưa vào danh sách enqueue. Bug này **chắc chắn lặp
+lại** với mọi campaign >1000 người nhận, không phải ngẫu nhiên/hiếm gặp.
+
+Đã sửa: phân trang truy vấn (mục 8), throttle enqueue tối đa 5 đồng thời +
+retry 3 lần (đề phòng giới hạn parallelism thật của QStash dù không phải
+nguyên nhân lần này), cho phép gọi lại `/send` khi `status='sending'` để
+resume (nút "Gửi tiếp" trên trang chi tiết campaign — chỉ enqueue batch còn
+`pending` nên gọi lại nhiều lần vẫn an toàn), và thêm trang xem log QStash
+theo từng batch (`GET /api/campaigns/[id]/qstash-log`) để tự chẩn đoán được
+tình huống tương tự sau này mà không cần script thủ công. Campaign bị kẹt đã
+được gửi tiếp thủ công ngay sau khi xác nhận với người dùng — hoàn tất với
+kết quả 2622 thành công / 371 lỗi / 0 pending.
+
+### 2026-07-16 — Rà soát luồng import/tạo campaign
 
 ### 2026-07-16 — Rà soát luồng import/tạo campaign
 

@@ -12,6 +12,7 @@ import {
   type ColumnMapping,
 } from "@/lib/spreadsheet/import";
 import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
+import { fetchAllRows } from "@/lib/supabase/pagination";
 
 const mappingSchema = z.object({
   customer_code: z.string().optional(),
@@ -121,21 +122,21 @@ export async function POST(request: NextRequest) {
         if (groupError || !group) {
           return NextResponse.json({ error: "Nhóm khách hàng không tồn tại" }, { status: 404 });
         }
-        const { data: members, error } = await supabase
-          .from("customer_group_members")
-          .select("customers(id, phone, zalo_uid, import_batch)")
-          .eq("group_id", groupId);
-        if (error) throw error;
-        customers = (members ?? [])
-          .map((m) => m.customers as unknown as BroadcastCustomer | null)
-          .filter((c): c is BroadcastCustomer => c != null);
+        const members = await fetchAllRows<{ customers: BroadcastCustomer | null }>((from, to) =>
+          supabase
+            .from("customer_group_members")
+            .select("customers(id, phone, zalo_uid, import_batch)")
+            .eq("group_id", groupId)
+            .range(from, to)
+        );
+        customers = members.map((m) => m.customers).filter((c): c is BroadcastCustomer => c != null);
         sourceLabel = `Nhóm: ${group.name}`;
       } else {
-        let query = supabase.from("customers").select("id, phone, zalo_uid, import_batch");
-        if (batchLabel) query = query.eq("import_batch", batchLabel);
-        const { data, error } = await query;
-        if (error) throw error;
-        customers = data;
+        customers = await fetchAllRows<BroadcastCustomer>((from, to) => {
+          let query = supabase.from("customers").select("id, phone, zalo_uid, import_batch").range(from, to);
+          if (batchLabel) query = query.eq("import_batch", batchLabel);
+          return query;
+        });
         sourceLabel = batchLabel ? `Lô: ${batchLabel}` : "Tất cả khách hàng";
       }
       if (!customers || customers.length === 0) {
