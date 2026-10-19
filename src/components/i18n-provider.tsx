@@ -1,46 +1,15 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { DEFAULT_LOCALE, translations, type Locale, type Namespace } from "@/lib/i18n/translations";
+import { translations, type Namespace } from "@/lib/i18n/translations";
+import { useUiStore } from "@/stores/ui-store";
 
-const STORAGE_KEY = "zns-locale";
-
-interface I18nContextValue {
-  locale: Locale;
-  setLocale: (locale: Locale) => void;
-}
-
-const I18nContext = createContext<I18nContextValue>({
-  locale: DEFAULT_LOCALE,
-  setLocale: () => {},
-});
-
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "vi" || stored === "ko") {
-      // Reading a persisted preference on mount, not derived from props/state.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLocaleState(stored);
-    }
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
-
-  const setLocale = useCallback((next: Locale) => {
-    window.localStorage.setItem(STORAGE_KEY, next);
-    setLocaleState(next);
-  }, []);
-
-  return <I18nContext.Provider value={{ locale, setLocale }}>{children}</I18nContext.Provider>;
-}
+// The active locale lives in the persisted UI store (see stores/ui-store.ts);
+// these hooks keep the original i18n API so call sites don't change.
 
 export function useLocale() {
-  return useContext(I18nContext);
+  const locale = useUiStore((s) => s.locale);
+  const setLocale = useUiStore((s) => s.setLocale);
+  return { locale, setLocale };
 }
 
 export function useTranslation<N extends Namespace>(namespace: N) {

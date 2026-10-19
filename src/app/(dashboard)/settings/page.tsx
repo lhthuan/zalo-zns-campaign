@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch, apiSend } from "@/lib/api-client";
+import { oaInfoQuery, queryKeys } from "@/lib/queries";
 
 interface SettingsData {
   zaloAppId: string | null;
@@ -56,13 +61,27 @@ interface LogEntry {
 
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
-  const [settings, setSettings] = useState<SettingsData | null>(null);
-  const [appId, setAppId] = useState("");
+  const queryClient = useQueryClient();
+  const settingsKey = [...queryKeys.settings, "zalo"];
+  const apiKeysKey = [...queryKeys.settings, "api-keys"];
+  const { data: settings = null, isPending: settingsPending } = useQuery({
+    queryKey: settingsKey,
+    queryFn: () => apiFetch<{ data: SettingsData | null }>("/api/settings/zalo").then((j) => j.data),
+    meta: { errorMessage: "Không tải được cấu hình" },
+  });
+  const { data: apiKeys = [], isPending: apiKeysPending } = useQuery({
+    queryKey: apiKeysKey,
+    queryFn: () => apiFetch<{ data: ApiKeyRow[] }>("/api/settings/api-keys").then((j) => j.data ?? []),
+  });
+  // The App ID field shows the saved value until the user edits it.
+  const [appIdDraft, setAppIdDraft] = useState<string | null>(null);
+  const appId = appIdDraft ?? settings?.zaloAppId ?? "";
+  const setAppId = setAppIdDraft;
+  const loadApiKeys = () => queryClient.invalidateQueries({ queryKey: apiKeysKey });
   const [secretKey, setSecretKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
-  const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyMaxTotal, setNewKeyMaxTotal] = useState("");
   const [newKeyMaxDaily, setNewKeyMaxDaily] = useState("");
@@ -83,38 +102,20 @@ export default function SettingsPage() {
     )
       return;
     setBackfilling(true);
-    const res = await fetch("/api/customers/backfill-phone", { method: "POST" });
-    const json = await res.json();
-    setBackfilling(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Chuẩn hoá thất bại");
-      return;
+    try {
+      const json = await apiSend<BackfillResult>("/api/customers/backfill-phone", "POST");
+      setBackfillResult(json);
+      toast.success(`Đã chuẩn hoá ${json.updated} SĐT`);
+      queryClient.invalidateQueries({ queryKey: queryKeys.customers });
+    } catch (err) {
+      toast.error(`Chuẩn hoá thất bại: ${(err as Error).message}`);
+    } finally {
+      setBackfilling(false);
     }
-    setBackfillResult(json);
-    toast.success(`Đã chuẩn hoá ${json.updated} SĐT`);
   }
 
   function addLog(message: string, level: LogEntry["level"] = "info") {
     setLog((prev) => [{ time: new Date().toLocaleTimeString("vi-VN"), message, level }, ...prev]);
-  }
-
-  useEffect(() => {
-    fetch("/api/settings/zalo")
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.data) {
-          setSettings(json.data);
-          setAppId(json.data.zaloAppId ?? "");
-        }
-      })
-      .catch(() => toast.error("Không tải được cấu hình"));
-    loadApiKeys();
-  }, []);
-
-  async function loadApiKeys() {
-    const res = await fetch("/api/settings/api-keys");
-    const json = await res.json();
-    if (res.ok) setApiKeys(json.data ?? []);
   }
 
   async function handleCreateKey() {
@@ -209,34 +210,41 @@ export default function SettingsPage() {
     addLog("Đã lưu App ID / App Secret Key vào database.");
     toast.success("Đã lưu");
     setSecretKey("");
-    setSettings((s) => (s ? { ...s, zaloAppId: appId.trim(), hasSecretKey: true } : s));
+    setAppIdDraft(null);
+    queryClient.invalidateQueries({ queryKey: settingsKey });
+    queryClient.invalidateQueries({ queryKey: queryKeys.oaInfo });
   }
 
   async function handleTest() {
     setTesting(true);
     addLog("Đang gọi Zalo API (oa/getoa) để kiểm tra kết nối...");
-    const res = await fetch("/api/zalo/oa-info");
-    const json = await res.json();
-    setTesting(false);
-
-    if (!res.ok || !json?.data?.name) {
-      addLog(`Test kết nối thất bại: ${json.error ?? "lỗi không xác định"}`, "error");
+    try {
+      // Goes through the shared OA query so the header badge updates too.
+      const data = (await queryClient.fetchQuery({ ...oaInfoQuery, staleTime: 0 })) as {
+        name?: string;
+        oaId?: string;
+      } | null;
+      if (!data?.name) throw new Error("lỗi không xác định");
+      addLog(`Kết nối thành công — OA: ${data.name} (${data.oaId})`);
+      toast.success(`Đã kết nối OA: ${data.name}`);
+    } catch (err) {
+      addLog(`Test kết nối thất bại: ${(err as Error).message}`, "error");
       toast.error("Test kết nối thất bại — xem log bên dưới");
-      return;
+    } finally {
+      setTesting(false);
     }
-    addLog(`Kết nối thành công — OA: ${json.data.name} (${json.data.oaId})`);
-    toast.success(`Đã kết nối OA: ${json.data.name}`);
   }
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">{t("title")}</h1>
+    <div className="max-w-4xl space-y-4">
+      <PageHeader title={t("title")} />
 
       <Card>
         <CardHeader>
           <CardTitle>{t("section1")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {settingsPending && <Skeleton className="h-5 w-72" />}
           {settings && (
             <p className="text-sm text-muted-foreground">
               {t("currentPrefix")}{" "}
@@ -334,6 +342,7 @@ export default function SettingsPage() {
             {creatingKey ? t("creatingKey") : t("createKey")}
           </Button>
 
+          {apiKeysPending && <Skeleton className="h-24" />}
           {apiKeys.length > 0 && (
             <Table>
               <TableHeader>

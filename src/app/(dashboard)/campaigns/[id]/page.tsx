@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useState, use } from "react";
 import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Copy, Eye, EyeOff, FileBarChart, Pencil, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -18,6 +21,8 @@ import {
 } from "@/components/ui/table";
 import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
 import { useTranslation } from "@/components/i18n-provider";
+import { apiFetch, apiSend } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
 
 interface Campaign {
   id: string;
@@ -60,112 +65,89 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const { t } = useTranslation("campaignDetail");
   const { t: tStatus } = useTranslation("campaignStatus");
-  const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [preview, setPreview] = useState<{ sample: PreviewRow[]; counts: { uid: number; phone: number } } | null>(
-    null
-  );
-  const [sending, setSending] = useState(false);
+  const queryClient = useQueryClient();
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [savingName, setSavingName] = useState(false);
   const [qstashOpen, setQstashOpen] = useState(false);
-  const [qstashLoading, setQstashLoading] = useState(false);
-  const [qstashLog, setQstashLog] = useState<QStashEventRow[] | null>(null);
 
-  const load = useCallback(async () => {
-    const [campaignRes, previewRes] = await Promise.all([
-      fetch(`/api/campaigns/${id}`),
-      fetch(`/api/campaigns/${id}/preview`),
+  const campaignKey = queryKeys.campaign(id);
+
+  const { data: campaign } = useQuery({
+    queryKey: campaignKey,
+    queryFn: () => apiFetch<{ data: Campaign }>(`/api/campaigns/${id}`).then((j) => j.data),
+    // Poll while the campaign is actively sending so progress updates live.
+    refetchInterval: (query) => (query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? 5000 : false),
+    meta: { errorMessage: "Không tải được chiến dịch" },
+  });
+
+  const { data: preview } = useQuery({
+    queryKey: [...campaignKey, "preview"],
+    queryFn: () =>
+      apiFetch<{ sample: PreviewRow[]; counts: { uid: number; phone: number } }>(`/api/campaigns/${id}/preview`),
+  });
+
+  const qstashQuery = useQuery({
+    queryKey: [...campaignKey, "qstash-log"],
+    queryFn: () => apiFetch<{ data: QStashEventRow[] }>(`/api/campaigns/${id}/qstash-log`).then((j) => j.data ?? []),
+    enabled: qstashOpen,
+    meta: { errorMessage: t("qstashLoadFailed") },
+  });
+
+  function invalidateCampaign() {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: campaignKey }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.campaignList(false) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.campaignList(true) }),
     ]);
-    const campaignJson = await campaignRes.json();
-    const previewJson = await previewRes.json();
-    if (campaignRes.ok) setCampaign(campaignJson.data);
-    if (previewRes.ok) setPreview(previewJson);
-  }, [id]);
-
-  useEffect(() => {
-    // Standard fetch-on-mount: `load` awaits before calling setState, it isn't synchronous.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!campaign || !ACTIVE_STATUSES.has(campaign.status)) return;
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
-  }, [campaign, load]);
-
-  async function loadQstashLog() {
-    setQstashLoading(true);
-    const res = await fetch(`/api/campaigns/${id}/qstash-log`);
-    const json = await res.json();
-    setQstashLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? t("qstashLoadFailed"));
-      return;
-    }
-    setQstashLog(json.data ?? []);
   }
 
-  function toggleQstashLog() {
-    const next = !qstashOpen;
-    setQstashOpen(next);
-    if (next && qstashLog == null) loadQstashLog();
-  }
+  const hideMutation = useMutation({
+    mutationFn: (isHidden: boolean) => apiSend(`/api/campaigns/${id}`, "PATCH", { is_hidden: !isHidden }),
+    onSuccess: (_d, isHidden) => toast.success(isHidden ? t("hidSuccess") : t("hideSuccess")),
+    onSettled: invalidateCampaign,
+    meta: { errorMessage: t("updateFailed") },
+  });
 
-  async function handleToggleHidden() {
-    if (!campaign) return;
-    const res = await fetch(`/api/campaigns/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_hidden: !campaign.is_hidden }),
-    });
-    if (!res.ok) {
-      toast.error(t("updateFailed"));
-      return;
-    }
-    toast.success(campaign.is_hidden ? t("hidSuccess") : t("hideSuccess"));
-    load();
-  }
+  const renameMutation = useMutation({
+    mutationFn: (name: string) => apiSend(`/api/campaigns/${id}`, "PATCH", { name }),
+    onSuccess: () => {
+      toast.success(t("renameSuccess"));
+      setEditingName(false);
+    },
+    onSettled: invalidateCampaign,
+    meta: { errorMessage: t("renameFailed") },
+  });
 
-  async function handleSaveName() {
+  const sendMutation = useMutation({
+    mutationFn: () => apiSend<{ batches: number; failedBatches?: number[] }>(`/api/campaigns/${id}/send`, "POST"),
+    onSuccess: (json) => {
+      toast.success(`${t("sendStarted")} (${json.batches} ${t("batches")})`);
+      if (json.failedBatches?.length) {
+        toast.warning(`${t("enqueueFailedWarning")}: ${json.failedBatches.join(", ")}`);
+      }
+    },
+    onSettled: invalidateCampaign,
+    meta: { errorMessage: t("sendFailed") },
+  });
+
+  function handleSaveName() {
     if (!campaign || !nameDraft.trim() || nameDraft.trim() === campaign.name) {
       setEditingName(false);
       return;
     }
-    setSavingName(true);
-    const res = await fetch(`/api/campaigns/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: nameDraft.trim() }),
-    });
-    setSavingName(false);
-    if (!res.ok) {
-      toast.error(t("renameFailed"));
-      return;
-    }
-    toast.success(t("renameSuccess"));
-    setEditingName(false);
-    load();
+    renameMutation.mutate(nameDraft.trim());
   }
 
-  async function handleSend() {
-    setSending(true);
-    const res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
-    const json = await res.json();
-    setSending(false);
-    if (!res.ok) {
-      toast.error(json.error ?? t("sendFailed"));
-      return;
-    }
-    toast.success(`${t("sendStarted")} (${json.batches} ${t("batches")})`);
-    if (json.failedBatches?.length > 0) {
-      toast.warning(`${t("enqueueFailedWarning")}: ${json.failedBatches.join(", ")}`);
-    }
-    load();
+  if (!campaign) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-8 w-80" />
+        <Skeleton className="h-48 rounded-xl" />
+        <Skeleton className="h-96 rounded-xl" />
+      </div>
+    );
   }
-
-  if (!campaign) return <p className="text-muted-foreground">{t("loading")}</p>;
 
   const progress =
     campaign.total_recipients > 0
@@ -173,10 +155,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       : 0;
 
   const remaining = Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count);
+  const sending = sendMutation.isPending;
 
-  const latestQstashByBatch = qstashLog
+  const latestQstashByBatch = qstashQuery.data
     ? Object.values(
-        qstashLog.reduce<Record<number, QStashEventRow>>((acc, e) => {
+        qstashQuery.data.reduce<Record<number, QStashEventRow>>((acc, e) => {
           if (e.batchNumber == null) return acc;
           if (!acc[e.batchNumber] || acc[e.batchNumber].time < e.time) acc[e.batchNumber] = e;
           return acc;
@@ -187,21 +170,26 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="space-y-4">
       <Button variant="ghost" size="sm" render={<Link href="/campaigns" />}>
-        ← {t("backToList")}
+        <ArrowLeft className="size-4" />
+        {t("backToList")}
       </Button>
 
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           {editingName ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
-                className="w-80 text-xl font-semibold"
+                className="w-80 max-w-full text-xl font-semibold"
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveName();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
                 autoFocus
               />
-              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
-                {savingName ? t("saving") : t("save")}
+              <Button size="sm" onClick={handleSaveName} disabled={renameMutation.isPending}>
+                {renameMutation.isPending ? t("saving") : t("save")}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
                 {t("cancel")}
@@ -209,20 +197,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold">{campaign.name}</h1>
+              <h1 className="font-heading text-2xl font-semibold tracking-tight">{campaign.name}</h1>
               <Button
                 variant="ghost"
                 size="sm"
+                title={t("editName")}
                 onClick={() => {
                   setNameDraft(campaign.name);
                   setEditingName(true);
                 }}
               >
-                {t("editName")}
+                <Pencil className="size-3.5" />
               </Button>
             </div>
           )}
-          <p className="text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             {t("templateLabel")}: {campaign.zalo_templates?.template_name ?? "—"}
           </p>
         </div>
@@ -231,9 +220,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             {tStatus(campaign.status as "draft" | "sending" | "completed" | "completed_with_errors" | "failed")}
           </Badge>
           <Button variant="outline" size="sm" render={<Link href={`/campaigns/new?copyFrom=${id}`} />}>
+            <Copy className="size-3.5" />
             {t("copy")}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleToggleHidden}>
+          <Button variant="outline" size="sm" onClick={() => hideMutation.mutate(campaign.is_hidden)}>
+            {campaign.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
             {campaign.is_hidden ? t("unhide") : t("hide")}
           </Button>
         </div>
@@ -246,13 +237,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         <CardContent className="space-y-3">
           <Progress value={progress} />
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="rounded-md border p-3">
+            <div className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">{t("total")}</p>
-              <p className="text-2xl font-semibold">{campaign.total_recipients}</p>
+              <p className="text-2xl font-semibold tabular-nums">{campaign.total_recipients}</p>
             </div>
-            <div className="rounded-md border p-3">
+            <div className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">{t("sent")}</p>
-              <p className="text-2xl font-semibold">{campaign.sent_count + campaign.failed_count}</p>
+              <p className="text-2xl font-semibold tabular-nums">{campaign.sent_count + campaign.failed_count}</p>
               <p className="text-xs text-muted-foreground">
                 <span className="text-emerald-600">
                   {campaign.sent_count} {t("success")}
@@ -260,34 +251,37 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 · <span className="text-destructive">{campaign.failed_count} {t("failed")}</span>
               </p>
             </div>
-            <div className="rounded-md border p-3">
+            <div className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">{t("remaining")}</p>
-              <p className="text-2xl font-semibold">{remaining}</p>
+              <p className="text-2xl font-semibold tabular-nums">{remaining}</p>
             </div>
-            <div className="rounded-md border p-3">
+            <div className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">{t("channel")}</p>
               {preview ? (
                 <p className="text-sm">
                   UID: <strong>{preview.counts.uid}</strong> · SĐT: <strong>{preview.counts.phone}</strong>
                 </p>
               ) : (
-                <p className="text-sm text-muted-foreground">—</p>
+                <Skeleton className="mt-1 h-5 w-32" />
               )}
             </div>
           </div>
           <div className="flex gap-2">
             {campaign.status === "draft" && (
-              <Button onClick={handleSend} disabled={sending}>
+              <Button onClick={() => sendMutation.mutate()} disabled={sending}>
+                <Play className="size-4" />
                 {sending ? t("starting") : t("sendCampaign")}
               </Button>
             )}
             {campaign.status === "sending" && remaining > 0 && (
-              <Button onClick={handleSend} disabled={sending} variant="outline">
+              <Button onClick={() => sendMutation.mutate()} disabled={sending} variant="outline">
+                <RotateCw className="size-4" />
                 {sending ? t("starting") : t("resumeSend")}
               </Button>
             )}
             {["completed", "completed_with_errors", "failed"].includes(campaign.status) && (
               <Button variant="outline" render={<Link href={`/campaigns/${id}/report`} />}>
+                <FileBarChart className="size-4" />
                 {t("viewReport")}
               </Button>
             )}
@@ -299,7 +293,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>{t("qstashLogTitle")}</CardTitle>
-            <Button variant="outline" size="sm" onClick={toggleQstashLog}>
+            <Button variant="outline" size="sm" onClick={() => setQstashOpen((o) => !o)}>
               {qstashOpen ? t("hideContent") : t("viewContent")}
             </Button>
           </div>
@@ -307,8 +301,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         {qstashOpen && (
           <CardContent className="space-y-2">
             <p className="text-xs text-muted-foreground">{t("qstashLogHint")}</p>
-            {qstashLoading ? (
-              <p className="text-sm text-muted-foreground">{t("loading")}</p>
+            {qstashQuery.isPending ? (
+              <Skeleton className="h-24" />
             ) : !latestQstashByBatch.length ? (
               <p className="text-sm text-muted-foreground">{t("qstashLogEmpty")}</p>
             ) : (
@@ -348,7 +342,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           <CardTitle>{t("recipientsTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <CampaignRecipientsGrid campaignId={id} />
+          <CampaignRecipientsGrid campaignId={id} live={ACTIVE_STATUSES.has(campaign.status)} />
         </CardContent>
       </Card>
     </div>

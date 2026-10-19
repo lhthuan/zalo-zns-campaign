@@ -39,7 +39,13 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
       <div className="w-full max-w-sm space-y-3">
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 font-heading text-base font-semibold">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm text-primary-foreground">
+              Z
+            </span>
+            ZNS Campaign
+          </div>
           <LanguageSwitcher />
         </div>
         <Card>

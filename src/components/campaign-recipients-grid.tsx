@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useState, useCallback } from "react";
-import { toast } from "sonner";
+import { Fragment, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "@/components/i18n-provider";
+import { TableMessageRow, TableSkeletonRows } from "@/components/table-states";
+import { apiFetch } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 interface RecipientRow {
   id: string;
@@ -42,18 +47,15 @@ const PAGE_SIZE_OPTIONS = [50, 100, 200, 500];
 const ALL_STATUS = "__all__";
 const ALL_MODE = "__all__";
 
-export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
+export function CampaignRecipientsGrid({ campaignId, live = false }: { campaignId: string; live?: boolean }) {
   const { t } = useTranslation("recipientsGrid");
   const STATUS_LABEL: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "outline" }> = {
     pending: { label: t("statusPending"), variant: "outline" },
     sent: { label: t("statusSent"), variant: "success" },
     failed: { label: t("statusFailed"), variant: "destructive" },
   };
-  const [rows, setRows] = useState<RecipientRow[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
-  const [loading, setLoading] = useState(false);
 
   const [filterPhone, setFilterPhone] = useState("");
   const [filterName, setFilterName] = useState("");
@@ -63,47 +65,39 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const buildParams = useCallback(
-    (targetPage: number) => {
-      const params = new URLSearchParams({
-        page: String(targetPage),
-        pageSize: String(pageSize),
-        sort: sortColumn,
-        dir: sortDir,
-      });
-      if (filterPhone.trim()) params.set("filterPhone", filterPhone.trim());
-      if (filterName.trim()) params.set("filterName", filterName.trim());
-      if (filterStatus !== ALL_STATUS) params.set("filterStatus", filterStatus);
-      if (filterSendMode !== ALL_MODE) params.set("filterSendMode", filterSendMode);
-      return params;
-    },
-    [pageSize, sortColumn, sortDir, filterPhone, filterName, filterStatus, filterSendMode]
-  );
+  const debouncedPhone = useDebouncedValue(filterPhone.trim());
+  const debouncedName = useDebouncedValue(filterName.trim());
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/campaigns/${campaignId}/recipients?${buildParams(page).toString()}`);
-    const json = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được danh sách người nhận");
-      return;
-    }
-    setRows(json.data ?? []);
-    setTotal(json.total ?? 0);
-  }, [campaignId, buildParams, page]);
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    sort: sortColumn,
+    dir: sortDir,
+  });
+  if (debouncedPhone) params.set("filterPhone", debouncedPhone);
+  if (debouncedName) params.set("filterName", debouncedName);
+  if (filterStatus !== ALL_STATUS) params.set("filterStatus", filterStatus);
+  if (filterSendMode !== ALL_MODE) params.set("filterSendMode", filterSendMode);
+  const queryString = params.toString();
 
-  useEffect(() => {
-    // Standard fetch-on-mount/filter-change: `load` awaits before calling setState.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+  const { data, isPending, isFetching } = useQuery({
+    queryKey: [...queryKeys.campaign(campaignId), "recipients", queryString],
+    queryFn: () =>
+      apiFetch<{ data: RecipientRow[]; total: number }>(`/api/campaigns/${campaignId}/recipients?${queryString}`),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? 5000 : false,
+    meta: { errorMessage: "Không tải được danh sách người nhận" },
+  });
+  const rows = data?.data ?? [];
+  const total = data?.total ?? 0;
 
-  // Reset to page 1 whenever a filter or sort changes (not on page itself).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPage(1);
-  }, [filterPhone, filterName, filterStatus, filterSendMode, sortColumn, sortDir, pageSize]);
+  // Any filter/sort/page-size change goes back to page 1.
+  function resetPage<T>(setter: (v: T) => void) {
+    return (v: T) => {
+      setter(v);
+      setPage(1);
+    };
+  }
 
   function handleSort(column: string) {
     if (sortColumn === column) {
@@ -112,6 +106,11 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
       setSortColumn(column);
       setSortDir("asc");
     }
+    setPage(1);
+  }
+
+  function sortMark(column: string) {
+    return sortColumn === column ? (sortDir === "asc" ? " ▲" : " ▼") : "";
   }
 
   function exportUrl(format: "xlsx" | "csv") {
@@ -126,52 +125,51 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
         <p className="text-sm text-muted-foreground">
           {t("totalPrefix")} <strong className="text-foreground">{total}</strong> {t("totalMatching")}
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Select value={String(pageSize)} onValueChange={(v) => resetPage(setPageSize)(Number(v) || 100)}>
+            <SelectTrigger className="h-8 w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n} {t("rowsPerPage")}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="sm" render={<a href={exportUrl("xlsx")} />}>
+            <Download className="size-3.5" />
             {t("exportExcel")}
           </Button>
           <Button variant="outline" size="sm" render={<a href={exportUrl("csv")} />}>
+            <Download className="size-3.5" />
             {t("exportCsv")}
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v) || 100)}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <SelectItem key={n} value={String(n)}>
-                {n} {t("rowsPerPage")}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="overflow-x-auto rounded-md border">
+      <div className={`overflow-x-auto rounded-md border transition-opacity ${isFetching && !isPending ? "opacity-80" : ""}`}>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("phone")}>
                 {t("colPhone")}
-                {sortColumn === "phone" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {sortMark("phone")}
               </TableHead>
               <TableHead>{t("colCustomer")}</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("send_mode")}>
                 {t("colMode")}
-                {sortColumn === "send_mode" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {sortMark("send_mode")}
               </TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("status")}>
                 {t("colStatus")}
-                {sortColumn === "status" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {sortMark("status")}
               </TableHead>
               <TableHead>{t("colError")}</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort("sent_at")}>
                 {t("colSentAt")}
-                {sortColumn === "sent_at" && (sortDir === "asc" ? " ▲" : " ▼")}
+                {sortMark("sent_at")}
               </TableHead>
               <TableHead>{t("colContent")}</TableHead>
             </TableRow>
@@ -181,7 +179,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                   className="h-7 text-xs"
                   placeholder={t("filterPhone")}
                   value={filterPhone}
-                  onChange={(e) => setFilterPhone(e.target.value)}
+                  onChange={(e) => resetPage(setFilterPhone)(e.target.value)}
                 />
               </TableHead>
               <TableHead>
@@ -189,13 +187,13 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
                   className="h-7 text-xs"
                   placeholder={t("filterCustomer")}
                   value={filterName}
-                  onChange={(e) => setFilterName(e.target.value)}
+                  onChange={(e) => resetPage(setFilterName)(e.target.value)}
                 />
               </TableHead>
               <TableHead>
                 <Select
                   value={filterSendMode}
-                  onValueChange={(v) => setFilterSendMode(v ?? ALL_MODE)}
+                  onValueChange={(v) => resetPage(setFilterSendMode)(v ?? ALL_MODE)}
                   items={{ [ALL_MODE]: `— ${t("allModes")} —`, uid: "UID", phone: t("colPhone") }}
                 >
                   <SelectTrigger className="h-7 w-full text-xs">
@@ -211,7 +209,7 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
               <TableHead>
                 <Select
                   value={filterStatus}
-                  onValueChange={(v) => setFilterStatus(v ?? ALL_STATUS)}
+                  onValueChange={(v) => resetPage(setFilterStatus)(v ?? ALL_STATUS)}
                   items={{
                     [ALL_STATUS]: `— ${t("allStatus")} —`,
                     ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
@@ -236,18 +234,10 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  {t("loading")}
-                </TableCell>
-              </TableRow>
+            {isPending ? (
+              <TableSkeletonRows cols={7} />
             ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  {t("noRows")}
-                </TableCell>
-              </TableRow>
+              <TableMessageRow cols={7}>{t("noRows")}</TableMessageRow>
             ) : (
               rows.map((row) => {
                 const statusInfo = STATUS_LABEL[row.status] ?? { label: row.status, variant: "outline" as const };
@@ -307,13 +297,15 @@ export function CampaignRecipientsGrid({ campaignId }: { campaignId: string }) {
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            <ChevronLeft className="size-4" />
             {t("previous")}
           </Button>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground tabular-nums">
             {t("pagePrefix")} {page}/{totalPages}
           </span>
           <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
             {t("next")}
+            <ChevronRight className="size-4" />
           </Button>
         </div>
       )}

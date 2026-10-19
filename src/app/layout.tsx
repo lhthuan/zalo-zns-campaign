@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Toaster } from "@/components/ui/sonner";
-import { I18nProvider } from "@/components/i18n-provider";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,10 +16,10 @@ export default function RootLayout({
   return (
     <html lang="vi" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <I18nProvider>
+        <Providers>
           {children}
-          <Toaster />
-        </I18nProvider>
+          <Toaster richColors closeButton />
+        </Providers>
       </body>
     </html>
   );

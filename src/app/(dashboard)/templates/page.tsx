@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,29 +17,30 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { formatVnd } from "@/lib/format";
 import { useTranslation } from "@/components/i18n-provider";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Search } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { TableMessageRow, TableSkeletonRows } from "@/components/table-states";
+import { ZnsPreviewFrame } from "@/components/zns-preview-frame";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch, apiSend } from "@/lib/api-client";
+import { queryKeys, useTemplates, type ZaloTemplate } from "@/lib/queries";
 
 type SortKey = "id" | "name";
 
-interface ZaloTemplateParam {
-  name: string;
-  require: boolean;
-  type: string;
-  maxLength?: number;
-  minLength?: number;
-}
-
-interface ZaloTemplate {
-  id: string;
-  template_id: string;
-  template_name: string;
-  status: string;
-  tag: string | null;
-  template_data_schema: ZaloTemplateParam[] | null;
-  preview_url: string | null;
-  price_sdt: number | null;
-  price_uid: number | null;
-  last_synced_at: string | null;
+/** The template's preview with its placeholders left as-is, rendered through our preview-html proxy. */
+function TemplatePreview({ template, title }: { template: ZaloTemplate; title: string }) {
+  const { data: html, isPending, error } = useQuery({
+    queryKey: ["template-preview", template.template_id],
+    queryFn: () =>
+      apiSend<{ html: string }>("/api/templates/preview-html", "POST", {
+        templateId: template.template_id,
+        params: {},
+      }).then((j) => j.html),
+    staleTime: 5 * 60_000,
+  });
+  if (isPending) return <Skeleton className="h-96 w-full" />;
+  if (error || !html) return <p className="p-4 text-sm text-muted-foreground">{error?.message ?? "—"}</p>;
+  return <ZnsPreviewFrame html={html} title={title} />;
 }
 
 export default function TemplatesPage() {
@@ -52,32 +54,21 @@ export default function TemplatesPage() {
     REJECT: { label: t("statusReject"), variant: "destructive" },
     DISABLE: { label: t("statusDisable"), variant: "outline" },
   };
-  const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: templates = [], isPending } = useTemplates();
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<ZaloTemplate | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "id", dir: "desc" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch("/api/templates");
-    const json = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được danh sách template");
-      return;
-    }
-    setTemplates(json.data);
-  }, []);
+  const syncMutation = useMutation({
+    mutationFn: () => apiFetch<{ synced: number; total: number }>("/api/templates/sync", { method: "POST" }),
+    onSuccess: (json) => toast.success(`Đã đồng bộ ${json.synced}/${json.total} template`),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.templates }),
+    meta: { errorMessage: "Sync thất bại" },
+  });
+  const syncing = syncMutation.isPending;
 
-  useEffect(() => {
-    // Standard fetch-on-mount: `load` awaits before calling setState, it isn't synchronous.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
-
-  const filtered = templates
+  const filtered = [...templates]
     .filter((tpl) => {
       if (!search.trim()) return true;
       const q = search.trim().toLowerCase();
@@ -107,41 +98,35 @@ export default function TemplatesPage() {
     return sort.dir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
   }
 
-  async function handleSync() {
-    setSyncing(true);
-    const res = await fetch("/api/templates/sync", { method: "POST" });
-    const json = await res.json();
-    setSyncing(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Sync thất bại");
-      return;
-    }
-    toast.success(`Đã đồng bộ ${json.synced}/${json.total} template`);
-    load();
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title={t("title")}
+        description={
+          <>
             {templates.length} {t("syncedCount")}
             {search.trim() && ` — ${filtered.length} ${t("searchMatches")}`}
-          </p>
-        </div>
-        <Button onClick={handleSync} disabled={syncing}>
-          {syncing ? t("syncing") : t("sync")}
-        </Button>
-      </div>
-
-      <Input
-        placeholder={t("searchPlaceholder")}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-sm"
+          </>
+        }
+        actions={
+          <Button onClick={() => syncMutation.mutate()} disabled={syncing}>
+            <RefreshCw className={`size-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? t("syncing") : t("sync")}
+          </Button>
+        }
       />
 
+      <div className="relative max-w-sm">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder={t("searchPlaceholder")}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-8"
+        />
+      </div>
+
+      <div className="rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
@@ -163,30 +148,20 @@ export default function TemplatesPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                {t("loading")}
-              </TableCell>
-            </TableRow>
+          {isPending ? (
+            <TableSkeletonRows cols={5} />
           ) : templates.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                {t("noTemplates")}
-              </TableCell>
-            </TableRow>
+            <TableMessageRow cols={5}>{t("noTemplates")}</TableMessageRow>
           ) : filtered.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                {t("noMatch")} &quot;{search}&quot;
-              </TableCell>
-            </TableRow>
+            <TableMessageRow cols={5}>
+              {t("noMatch")} &quot;{search}&quot;
+            </TableMessageRow>
           ) : (
             filtered.map((tpl) => {
               const statusInfo = STATUS_LABEL[tpl.status] ?? { label: tpl.status, variant: "outline" as const };
               return (
                 <TableRow key={tpl.id} className="cursor-pointer" onClick={() => setDetail(tpl)}>
-                  <TableCell className="hover:underline">{tpl.template_name}</TableCell>
+                  <TableCell className="font-medium hover:underline">{tpl.template_name}</TableCell>
                   <TableCell className="font-mono text-xs">{tpl.template_id}</TableCell>
                   <TableCell>{tpl.tag ?? "—"}</TableCell>
                   <TableCell>
@@ -201,6 +176,7 @@ export default function TemplatesPage() {
           )}
         </TableBody>
       </Table>
+      </div>
 
       <Dialog open={detail != null} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col overflow-hidden p-0">
@@ -271,11 +247,10 @@ export default function TemplatesPage() {
                 {detail.preview_url && (
                   <div className="flex w-full shrink-0 flex-col border-t p-4 lg:w-[440px] lg:border-t-0 lg:border-l">
                     <p className="mb-2 shrink-0 text-sm font-medium">{t("previewTitle")}</p>
-                    <div className="min-h-[600px] flex-1 overflow-hidden rounded-lg border lg:min-h-0">
-                      <iframe
-                        src={detail.preview_url}
+                    <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
+                      <TemplatePreview
+                        template={detail}
                         title={`${t("previewTitle")} ${detail.template_name}`}
-                        className="h-full w-full"
                       />
                     </div>
                   </div>

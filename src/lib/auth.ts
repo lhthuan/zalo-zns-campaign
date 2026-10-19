@@ -8,11 +8,12 @@ export class UnauthorizedError extends Error {
 }
 
 /** Throws UnauthorizedError if there is no logged-in staff/admin user. Use at the top of API route handlers (except QStash callbacks, which verify via signature instead). */
-export async function requireUser() {
+export async function requireUser(): Promise<{ id: string; email: string | null }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new UnauthorizedError();
-  return user;
+  // getClaims verifies the session JWT (locally with asymmetric signing keys,
+  // via the Auth server otherwise) — cheaper than getUser on every request.
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  if (!claims?.sub) throw new UnauthorizedError();
+  return { id: claims.sub, email: typeof claims.email === "string" ? claims.email : null };
 }

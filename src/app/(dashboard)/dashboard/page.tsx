@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { toast } from "sonner";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { CircleCheck, Megaphone, Send, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -14,6 +15,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
 
 interface CampaignRow {
   id: string;
@@ -113,6 +118,32 @@ function Donut({
   );
 }
 
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  valueClassName,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className={`mt-1 truncate text-2xl font-semibold ${valueClassName ?? ""}`}>{value}</p>
+        </div>
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+          <Icon className="size-4" />
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const { t } = useTranslation("dashboard");
   const { t: tStatus } = useTranslation("campaignStatus");
@@ -123,46 +154,19 @@ export default function DashboardPage() {
     all: t("rangeAll"),
   };
   const [range, setRange] = useState<keyof typeof RANGE_OPTIONS>("30");
-  const [data, setData] = useState<Overview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isFetching } = useQuery({
+    queryKey: queryKeys.dashboard(range),
+    queryFn: () => apiFetch<{ data: Overview }>(`/api/dashboard/overview?days=${range}`).then((j) => j.data),
+    // Keep showing the previous range's numbers while the new range loads.
+    placeholderData: keepPreviousData,
+    meta: { errorMessage: "Không tải được dashboard" },
+  });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/dashboard/overview?days=${range}`);
-    const json = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được dashboard");
-      return;
-    }
-    setData(json.data);
-  }, [range]);
-
-  useEffect(() => {
-    // Standard fetch-on-mount/range-change: `load` awaits before calling setState.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
-
-  if (loading && !data) return <p className="text-muted-foreground">{t("noData")}</p>;
-  if (!data) return null;
-
-  const { totals, byCampaign, byChannel, topCustomers } = data;
-  const totalSent = totals.campaignSent + totals.apiSent + totals.testSent;
-  const totalFailed = totals.campaignFailed + totals.apiFailed + totals.testFailed;
-  const totalCost = totals.campaignCost + totals.apiCost + totals.testCost;
-  const totalAttempted = totalSent + totalFailed;
-  const successRate = totalAttempted > 0 ? ((totalSent / totalAttempted) * 100).toFixed(1) : "—";
-
-  const maxCampaignVolume = Math.max(1, ...byCampaign.map((c) => c.sent + c.failed + c.pending));
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-        </div>
+  const header = (
+    <PageHeader
+      title={t("title")}
+      description={t("subtitle")}
+      actions={
         <Select value={range} onValueChange={(v) => setRange((v as keyof typeof RANGE_OPTIONS) ?? "30")} items={RANGE_OPTIONS}>
           <SelectTrigger className="w-48">
             <SelectValue />
@@ -175,33 +179,50 @@ export default function DashboardPage() {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      }
+    />
+  );
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">{t("totalSent")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{totalSent.toLocaleString("vi-VN")}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">{t("successRate")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-emerald-600">{successRate}%</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">{t("totalCost")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{formatVnd(totalCost)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">{t("campaignCount")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{totals.campaignCount}</CardContent>
-        </Card>
+  if (!data) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-28 rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-64 rounded-xl" />
+          <Skeleton className="h-64 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  const { totals, byCampaign, byChannel, topCustomers } = data;
+  const totalSent = totals.campaignSent + totals.apiSent + totals.testSent;
+  const totalFailed = totals.campaignFailed + totals.apiFailed + totals.testFailed;
+  const totalCost = totals.campaignCost + totals.apiCost + totals.testCost;
+  const totalAttempted = totalSent + totalFailed;
+  const successRate = totalAttempted > 0 ? ((totalSent / totalAttempted) * 100).toFixed(1) : "—";
+
+  const maxCampaignVolume = Math.max(1, ...byCampaign.map((c) => c.sent + c.failed + c.pending));
+
+  return (
+    <div className={`space-y-4 transition-opacity ${isFetching ? "opacity-70" : ""}`}>
+      {header}
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard icon={Send} label={t("totalSent")} value={totalSent.toLocaleString("vi-VN")} />
+        <StatCard
+          icon={CircleCheck}
+          label={t("successRate")}
+          value={`${successRate}%`}
+          valueClassName="text-emerald-600"
+        />
+        <StatCard icon={Wallet} label={t("totalCost")} value={formatVnd(totalCost)} />
+        <StatCard icon={Megaphone} label={t("campaignCount")} value={String(totals.campaignCount)} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

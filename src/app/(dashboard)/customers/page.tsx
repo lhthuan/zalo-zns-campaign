@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, FolderTree, History, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +34,12 @@ import {
 import { isValidVietnamesePhone } from "@/lib/phone";
 import { ALL_CUSTOMERS_BATCH, ALL_CUSTOMERS_LABEL } from "@/lib/customerBatch";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { TableMessageRow, TableSkeletonRows } from "@/components/table-states";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch, apiSend } from "@/lib/api-client";
+import { customerGroupsQuery, importBatchesQuery, queryKeys } from "@/lib/queries";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 interface Customer {
   id: string;
@@ -41,18 +49,6 @@ interface Customer {
   zalo_uid: string | null;
   import_batch: string | null;
   created_at: string;
-}
-
-interface ImportBatch {
-  import_batch: string;
-  customer_count: number;
-  last_imported_at: string;
-}
-
-interface CustomerGroup {
-  group_id: string;
-  name: string;
-  customer_count: number;
 }
 
 interface ImportHistoryEntry {
@@ -90,15 +86,6 @@ interface ColumnDef {
   render: (c: Customer) => React.ReactNode;
 }
 
-function useDebouncedValue<T>(value: T, delayMs = 350): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timeout = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timeout);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 export default function CustomersPage() {
   const { t } = useTranslation("customers");
   const { t: tc } = useTranslation("common");
@@ -121,22 +108,16 @@ export default function CustomersPage() {
       render: (c) => new Date(c.created_at).toLocaleDateString("vi-VN"),
     },
   ];
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   const [pageSize, setPageSize] = useState(100);
   const [textFilters, setTextFilters] = useState<Record<string, string>>({});
-  const debouncedTextFilters = useDebouncedValue(textFilters);
+  const debouncedTextFilters = useDebouncedValue(textFilters, 350);
   const [batchFilter, setBatchFilter] = useState(ALL_CUSTOMERS_BATCH);
   const [groupFilter, setGroupFilter] = useState(ALL_GROUPS);
   const [sortColumn, setSortColumn] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const loadedPageRef = useRef(1);
-
-  const [batches, setBatches] = useState<ImportBatch[]>([]);
-  const [groups, setGroups] = useState<CustomerGroup[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { data: batches = [] } = useQuery(importBatchesQuery);
+  const { data: groups = [] } = useQuery(customerGroupsQuery);
   const [deletingBatch, setDeletingBatch] = useState(false);
 
   const [editing, setEditing] = useState<Customer | null>(null);
@@ -154,77 +135,77 @@ export default function CustomersPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [messagesFor, setMessagesFor] = useState<Customer | null>(null);
-  const [messages, setMessages] = useState<MessageLogEntry[] | null>(null);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
-  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[] | null>(null);
 
-  const buildParams = useCallback(
-    (page: number) => {
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: String(pageSize),
-        sort: sortColumn,
-        dir: sortDir,
-      });
-      for (const [key, value] of Object.entries(debouncedTextFilters)) {
-        if (value) params.set(key, value);
-      }
-      if (batchFilter !== ALL_CUSTOMERS_BATCH) params.set("batch", batchFilter);
-      if (groupFilter !== ALL_GROUPS) params.set("groupId", groupFilter);
-      return params;
+  const baseParams = new URLSearchParams({ pageSize: String(pageSize), sort: sortColumn, dir: sortDir });
+  for (const [key, value] of Object.entries(debouncedTextFilters)) {
+    if (value) baseParams.set(key, value);
+  }
+  if (batchFilter !== ALL_CUSTOMERS_BATCH) baseParams.set("batch", batchFilter);
+  if (groupFilter !== ALL_GROUPS) baseParams.set("groupId", groupFilter);
+  const listQueryString = baseParams.toString();
+
+  const customersQuery = useInfiniteQuery({
+    queryKey: [...queryKeys.customers, "list", listQueryString],
+    queryFn: ({ pageParam }) =>
+      apiFetch<{ data: Customer[]; total: number }>(`/api/customers?page=${pageParam}&${listQueryString}`),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.data.length, 0);
+      return loaded < lastPage.total && lastPage.data.length > 0 ? allPages.length + 1 : undefined;
     },
-    [pageSize, sortColumn, sortDir, debouncedTextFilters, batchFilter, groupFilter]
-  );
+    placeholderData: keepPreviousData,
+    meta: { errorMessage: "Không tải được danh sách khách hàng" },
+  });
+  const customers = customersQuery.data?.pages.flatMap((p) => p.data) ?? [];
+  const total = customersQuery.data?.pages[0]?.total ?? 0;
+  const loading = customersQuery.isPending;
+  const loadingMore = customersQuery.isFetchingNextPage;
 
-  const load = useCallback(
-    async (mode: "reset" | "more") => {
-      if (mode === "reset") setLoading(true);
-      else setLoadingMore(true);
-      const page = mode === "reset" ? 1 : loadedPageRef.current + 1;
-      const res = await fetch(`/api/customers?${buildParams(page).toString()}`);
-      const json = await res.json();
-      if (mode === "reset") setLoading(false);
-      else setLoadingMore(false);
-      if (!res.ok) {
-        toast.error(json.error ?? "Không tải được danh sách khách hàng");
-        return;
-      }
-      setTotal(json.total);
-      if (mode === "reset") {
-        setCustomers(json.data);
-        loadedPageRef.current = 1;
-        setSelectedIds(new Set());
-      } else {
-        setCustomers((prev) => [...prev, ...json.data]);
-        loadedPageRef.current = page;
-      }
-    },
-    [buildParams]
-  );
+  // Selection belongs to one filtered list: changing a filter/sort drops it.
+  const [selection, setSelection] = useState<{ listKey: string; ids: Set<string> }>({
+    listKey: listQueryString,
+    ids: new Set(),
+  });
+  const selectedIds = selection.listKey === listQueryString ? selection.ids : new Set<string>();
+  function setSelectedIds(update: Set<string> | ((prev: Set<string>) => Set<string>)) {
+    setSelection((prev) => {
+      const current = prev.listKey === listQueryString ? prev.ids : new Set<string>();
+      return { listKey: listQueryString, ids: typeof update === "function" ? update(current) : update };
+    });
+  }
 
-  const loadBatches = useCallback(async () => {
-    const res = await fetch("/api/customers/import-batches");
-    const json = await res.json();
-    if (res.ok) setBatches(json.data ?? []);
-  }, []);
+  const messagesQuery = useQuery({
+    queryKey: [...queryKeys.customers, "messages", messagesFor?.id],
+    queryFn: () =>
+      apiFetch<{ data: MessageLogEntry[] }>(`/api/customers/${messagesFor!.id}/messages`).then((j) => j.data ?? []),
+    enabled: !!messagesFor,
+    meta: { errorMessage: "Không tải được lịch sử tin nhắn" },
+  });
+  const importHistoryQuery = useQuery({
+    queryKey: [...queryKeys.customers, "import-history", messagesFor?.id],
+    queryFn: () =>
+      apiFetch<{ data: ImportHistoryEntry[] }>(`/api/customers/${messagesFor!.id}/import-history`).then(
+        (j) => j.data ?? []
+      ),
+    enabled: !!messagesFor,
+  });
+  const messages = messagesQuery.data ?? null;
+  const importHistory = importHistoryQuery.data ?? null;
 
-  const loadGroups = useCallback(async () => {
-    const res = await fetch("/api/customer-groups");
-    const json = await res.json();
-    if (res.ok) setGroups(json.data ?? []);
-  }, []);
+  const invalidateCustomers = () => queryClient.invalidateQueries({ queryKey: queryKeys.customers });
+  const invalidateGroups = () => queryClient.invalidateQueries({ queryKey: queryKeys.customerGroups });
+  const invalidateBatches = () => queryClient.invalidateQueries({ queryKey: queryKeys.importBatches });
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load("reset");
-  }, [load]);
-
-  useEffect(() => {
-    // Standard fetch-on-mount: both await before calling setState, neither is synchronous.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadBatches();
-    loadGroups();
-  }, [loadBatches, loadGroups]);
+  /** Runs a write request, toasting its error; resolves to the JSON on success or null on failure. */
+  async function run<T>(request: () => Promise<T>, errorMessage: string): Promise<T | null> {
+    try {
+      return await request();
+    } catch (err) {
+      toast.error(`${errorMessage}: ${(err as Error).message}`);
+      return null;
+    }
+  }
 
   function handleSort(column: string) {
     if (sortColumn === column) {
@@ -243,19 +224,18 @@ export default function CustomersPage() {
     if (batchFilter === ALL_CUSTOMERS_BATCH) return;
     if (!confirm(`Xoá toàn bộ khách hàng trong lô "${batchFilter}"? Không thể hoàn tác.`)) return;
     setDeletingBatch(true);
-    const res = await fetch(`/api/customers/import-batches?batch=${encodeURIComponent(batchFilter)}`, {
-      method: "DELETE",
-    });
-    const json = await res.json();
+    const json = await run(
+      () =>
+        apiSend<{ deleted: number }>(`/api/customers/import-batches?batch=${encodeURIComponent(batchFilter)}`, "DELETE"),
+      "Không xoá được lô này"
+    );
     setDeletingBatch(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không xoá được lô này");
-      return;
-    }
+    if (!json) return;
     toast.success(`Đã xoá ${json.deleted} khách hàng thuộc lô "${batchFilter}"`);
     setBatchFilter(ALL_CUSTOMERS_BATCH);
-    load("reset");
-    loadBatches();
+    invalidateCustomers();
+    invalidateBatches();
+    invalidateGroups();
   }
 
   function toggleSelect(id: string) {
@@ -275,134 +255,96 @@ export default function CustomersPage() {
 
   async function handleCreateGroupFromSelection() {
     if (!createGroupName.trim()) return toast.error("Đặt tên nhóm");
-    const res = await fetch("/api/customer-groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: createGroupName.trim(), customer_ids: [...selectedIds] }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Tạo nhóm thất bại");
-      return;
-    }
+    const json = await run(
+      () => apiSend("/api/customer-groups", "POST", { name: createGroupName.trim(), customer_ids: [...selectedIds] }),
+      "Tạo nhóm thất bại"
+    );
+    if (!json) return;
     toast.success(`Đã tạo nhóm "${createGroupName.trim()}" với ${selectedIds.size} khách hàng`);
     setCreateGroupOpen(false);
     setCreateGroupName("");
     setSelectedIds(new Set());
-    loadGroups();
+    invalidateGroups();
   }
 
   async function handleBulkDelete() {
     if (selectedIds.size === 0) return;
     if (!confirm(`Xoá ${selectedIds.size} khách hàng đang chọn? Không thể hoàn tác.`)) return;
     setBulkDeleting(true);
-    const res = await fetch("/api/customers", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [...selectedIds] }),
-    });
-    const json = await res.json();
+    const json = await run(
+      () => apiSend<{ deleted: number }>("/api/customers", "DELETE", { ids: [...selectedIds] }),
+      "Xoá thất bại"
+    );
     setBulkDeleting(false);
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Xoá thất bại");
-      return;
-    }
+    if (!json) return;
     toast.success(`Đã xoá ${json.deleted} khách hàng`);
     setSelectedIds(new Set());
-    load("reset");
+    invalidateCustomers();
+    invalidateBatches();
+    invalidateGroups();
   }
 
   async function handleAddSelectedToGroup() {
     if (!assignGroupId) return toast.error("Chọn 1 nhóm");
     setAssigningGroup(true);
-    const res = await fetch(`/api/customer-groups/${assignGroupId}/members`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_ids: [...selectedIds] }),
-    });
+    const json = await run(
+      () => apiSend(`/api/customer-groups/${assignGroupId}/members`, "POST", { customer_ids: [...selectedIds] }),
+      "Thêm vào nhóm thất bại"
+    );
     setAssigningGroup(false);
-    if (!res.ok) {
-      toast.error("Thêm vào nhóm thất bại");
-      return;
-    }
+    if (!json) return;
     toast.success(`Đã thêm ${selectedIds.size} khách hàng vào nhóm`);
     setAssignGroupOpen(false);
-    loadGroups();
+    invalidateGroups();
+    if (groupFilter === assignGroupId) invalidateCustomers();
   }
 
   async function handleRemoveSelectedFromGroup() {
     if (!assignGroupId) return toast.error("Chọn 1 nhóm");
     setAssigningGroup(true);
-    const res = await fetch(`/api/customer-groups/${assignGroupId}/members`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_ids: [...selectedIds] }),
-    });
+    const json = await run(
+      () => apiSend(`/api/customer-groups/${assignGroupId}/members`, "DELETE", { customer_ids: [...selectedIds] }),
+      "Gỡ khỏi nhóm thất bại"
+    );
     setAssigningGroup(false);
-    if (!res.ok) {
-      toast.error("Gỡ khỏi nhóm thất bại");
-      return;
-    }
+    if (!json) return;
     toast.success(`Đã gỡ ${selectedIds.size} khách hàng khỏi nhóm`);
     setAssignGroupOpen(false);
-    loadGroups();
-    if (groupFilter === assignGroupId) load("reset");
+    invalidateGroups();
+    if (groupFilter === assignGroupId) invalidateCustomers();
   }
 
   async function handleCreateGroupInline() {
     if (!newGroupNameInline.trim()) return;
-    const res = await fetch("/api/customer-groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newGroupNameInline.trim() }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Tạo nhóm thất bại");
-      return;
-    }
+    const json = await run(
+      () => apiSend("/api/customer-groups", "POST", { name: newGroupNameInline.trim() }),
+      "Tạo nhóm thất bại"
+    );
+    if (!json) return;
     setNewGroupNameInline("");
-    loadGroups();
+    invalidateGroups();
   }
 
   async function handleRenameGroup(groupId: string, currentName: string) {
     const name = prompt("Tên nhóm mới:", currentName);
     if (!name || !name.trim() || name.trim() === currentName) return;
-    const res = await fetch(`/api/customer-groups/${groupId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() }),
-    });
-    if (!res.ok) return toast.error("Đổi tên thất bại");
-    loadGroups();
+    const json = await run(() => apiSend(`/api/customer-groups/${groupId}`, "PATCH", { name: name.trim() }), "Đổi tên thất bại");
+    if (!json) return;
+    invalidateGroups();
   }
 
   async function handleDeleteGroup(groupId: string, name: string) {
     if (!confirm(`Xoá nhóm "${name}"? Khách hàng trong nhóm không bị xoá, chỉ gỡ khỏi nhóm này.`)) return;
-    const res = await fetch(`/api/customer-groups/${groupId}`, { method: "DELETE" });
-    if (!res.ok) return toast.error("Xoá thất bại");
+    const json = await run(() => apiSend(`/api/customer-groups/${groupId}`, "DELETE"), "Xoá thất bại");
+    if (!json) return;
     toast.success("Đã xoá nhóm");
     if (groupFilter === groupId) setGroupFilter(ALL_GROUPS);
-    loadGroups();
+    invalidateGroups();
   }
 
-  async function openMessages(customer: Customer) {
+  function openMessages(customer: Customer) {
     setMessagesFor(customer);
-    setMessages(null);
-    setImportHistory(null);
     setExpandedMessageId(null);
-    const [messagesRes, historyRes] = await Promise.all([
-      fetch(`/api/customers/${customer.id}/messages`),
-      fetch(`/api/customers/${customer.id}/import-history`),
-    ]);
-    const messagesJson = await messagesRes.json();
-    if (!messagesRes.ok) {
-      toast.error(messagesJson.error ?? "Không tải được lịch sử tin nhắn");
-    } else {
-      setMessages(messagesJson.data ?? []);
-    }
-    const historyJson = await historyRes.json();
-    if (historyRes.ok) setImportHistory(historyJson.data ?? []);
   }
 
   function openNew() {
@@ -433,41 +375,35 @@ export default function CustomersPage() {
     }
     const isNew = !editing.id;
     const url = isNew ? "/api/customers" : `/api/customers/${editing.id}`;
-    const res = await fetch(url, {
-      method: isNew ? "POST" : "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        customer_code: editing.customer_code || undefined,
-        name: editing.name || (isNew ? undefined : null),
-        phone: editing.phone || (isNew ? undefined : null),
-        zalo_uid: editing.zalo_uid || (isNew ? undefined : null),
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      toast.error(JSON.stringify(json.error));
-      return;
-    }
+    const json = await run(
+      () =>
+        apiSend(url, isNew ? "POST" : "PUT", {
+          customer_code: editing.customer_code || undefined,
+          name: editing.name || (isNew ? undefined : null),
+          phone: editing.phone || (isNew ? undefined : null),
+          zalo_uid: editing.zalo_uid || (isNew ? undefined : null),
+        }),
+      isNew ? "Thêm khách hàng thất bại" : "Cập nhật thất bại"
+    );
+    if (!json) return;
     toast.success(isNew ? "Đã thêm khách hàng" : "Đã cập nhật khách hàng");
     setDialogOpen(false);
-    load("reset");
+    invalidateCustomers();
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Xoá khách hàng này?")) return;
-    const res = await fetch(`/api/customers/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      toast.error("Không xoá được");
-      return;
-    }
+    const json = await run(() => apiSend(`/api/customers/${id}`, "DELETE"), "Không xoá được");
+    if (!json) return;
     toast.success("Đã xoá");
-    load("reset");
+    invalidateCustomers();
+    invalidateBatches();
+    invalidateGroups();
   }
 
   function exportUrl(format: "xlsx" | "csv") {
-    const params = buildParams(1);
+    const params = new URLSearchParams(listQueryString);
     params.set("format", format);
-    params.delete("page");
     params.delete("pageSize");
     return `/api/customers/export?${params.toString()}`;
   }
@@ -483,24 +419,33 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" render={<Link href={exportUrl("xlsx")} />}>
-            {t("exportExcel")}
-          </Button>
-          <Button variant="outline" render={<Link href={exportUrl("csv")} />}>
-            {t("exportCsv")}
-          </Button>
-          <Button variant="outline" onClick={() => setGroupDialogOpen(true)}>
-            {t("manageGroups")}
-          </Button>
-          <Button variant="outline" render={<Link href="/customers/import" />}>
-            {t("importFile")}
-          </Button>
-          <Button onClick={openNew}>{t("addCustomer")}</Button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={
+          <>
+            <Button variant="outline" render={<a href={exportUrl("xlsx")} />}>
+              <Download className="size-4" />
+              {t("exportExcel")}
+            </Button>
+            <Button variant="outline" render={<a href={exportUrl("csv")} />}>
+              <Download className="size-4" />
+              {t("exportCsv")}
+            </Button>
+            <Button variant="outline" onClick={() => setGroupDialogOpen(true)}>
+              <FolderTree className="size-4" />
+              {t("manageGroups")}
+            </Button>
+            <Button variant="outline" render={<Link href="/customers/import" />}>
+              <Upload className="size-4" />
+              {t("importFile")}
+            </Button>
+            <Button onClick={openNew}>
+              <Plus className="size-4" />
+              {t("addCustomer")}
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <Select value={batchFilter} onValueChange={(v) => setBatchFilter(v ?? ALL_CUSTOMERS_BATCH)} items={batchItems}>
@@ -551,7 +496,7 @@ export default function CustomersPage() {
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
+        <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border bg-secondary/90 p-3 shadow-sm backdrop-blur">
           <span className="text-sm">
             {selectedIds.size} {t("selectedCount")}
           </span>
@@ -575,13 +520,18 @@ export default function CustomersPage() {
         {customers.length < total && ` — ${t("loadedSoFar")} ${customers.length}`}
       </p>
 
-      <div className="overflow-x-auto rounded-md border">
+      <div
+        className={`overflow-x-auto rounded-xl border bg-card transition-opacity ${
+          customersQuery.isFetching && !loading && !loadingMore ? "opacity-70" : ""
+        }`}
+      >
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
                 <input
                   type="checkbox"
+                  className="accent-primary"
                   checked={customers.length > 0 && selectedIds.size === customers.length}
                   onChange={toggleSelectAllLoaded}
                 />
@@ -617,35 +567,39 @@ export default function CustomersPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
-                  {tc("loading")}
-                </TableCell>
-              </TableRow>
+              <TableSkeletonRows cols={COLUMNS.length + 2} rows={10} />
             ) : customers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS.length + 2} className="text-center text-muted-foreground">
-                  {t("noCustomers")}
-                </TableCell>
-              </TableRow>
+              <TableMessageRow cols={COLUMNS.length + 2}>{t("noCustomers")}</TableMessageRow>
             ) : (
               customers.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell>
-                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => toggleSelect(c.id)}
+                    />
                   </TableCell>
                   {COLUMNS.map((col) => (
                     <TableCell key={col.key}>{col.render(c)}</TableCell>
                   ))}
                   <TableCell className="text-right space-x-1 whitespace-nowrap">
-                    <Button variant="ghost" size="sm" onClick={() => openMessages(c)}>
-                      {t("lookupMessages")}
+                    <Button variant="ghost" size="sm" onClick={() => openMessages(c)} title={t("lookupMessages")}>
+                      <History className="size-3.5" />
+                      <span className="hidden xl:inline">{t("lookupMessages")}</span>
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
-                      {tc("edit")}
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(c)} title={tc("edit")}>
+                      <Pencil className="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)}>
-                      {tc("delete")}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(c.id)}
+                      title={tc("delete")}
+                    >
+                      <Trash2 className="size-3.5" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -657,7 +611,7 @@ export default function CustomersPage() {
 
       {customers.length < total && (
         <div className="flex justify-center">
-          <Button variant="outline" onClick={() => load("more")} disabled={loadingMore}>
+          <Button variant="outline" onClick={() => customersQuery.fetchNextPage()} disabled={loadingMore}>
             {loadingMore ? tc("loading") : `${t("loadMore")} (${customers.length}/${total})`}
           </Button>
         </div>
@@ -838,7 +792,7 @@ export default function CustomersPage() {
           <div className="space-y-1 border-b pb-3">
             <p className="text-sm font-medium">{t("importHistoryTitle")}</p>
             {importHistory == null ? (
-              <p className="text-xs text-muted-foreground">{tc("loading")}</p>
+              <Skeleton className="h-5 w-48" />
             ) : importHistory.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("noImportHistory")}</p>
             ) : (
@@ -855,7 +809,10 @@ export default function CustomersPage() {
             )}
           </div>
           {messages == null ? (
-            <p className="text-sm text-muted-foreground">{tc("loading")}</p>
+            <div className="space-y-2">
+              <Skeleton className="h-14" />
+              <Skeleton className="h-14" />
+            </div>
           ) : messages.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("noMessages")}</p>
           ) : (

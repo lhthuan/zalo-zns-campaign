@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +25,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { TableMessageRow, TableSkeletonRows } from "@/components/table-states";
+import { apiFetch, apiSend } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
 
 interface Campaign {
   id: string;
@@ -40,6 +46,7 @@ const ALL_STATUS = "__all__";
 
 export default function CampaignsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation("campaigns");
   const { t: tStatus } = useTranslation("campaignStatus");
 
@@ -57,45 +64,39 @@ export default function CampaignsPage() {
     [ALL_STATUS]: `— ${t("allStatus")} —`,
     ...Object.fromEntries(Object.entries(STATUS_LABEL).map(([k, v]) => [k, v.label])),
   };
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [filterName, setFilterName] = useState("");
   const [filterTemplate, setFilterTemplate] = useState("");
   const [filterStatus, setFilterStatus] = useState(ALL_STATUS);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/campaigns${showHidden ? "?includeHidden=true" : ""}`);
-    const json = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(json.error ?? "Không tải được danh sách chiến dịch");
-      return;
-    }
-    setCampaigns(json.data ?? []);
-  }, [showHidden]);
+  const { data: campaigns = [], isPending } = useQuery({
+    queryKey: queryKeys.campaignList(showHidden),
+    queryFn: () =>
+      apiFetch<{ data: Campaign[] }>(`/api/campaigns${showHidden ? "?includeHidden=true" : ""}`).then(
+        (j) => j.data ?? []
+      ),
+    meta: { errorMessage: "Không tải được danh sách chiến dịch" },
+  });
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+  const hideMutation = useMutation({
+    mutationFn: (c: Campaign) => apiSend(`/api/campaigns/${c.id}`, "PATCH", { is_hidden: !c.is_hidden }),
+    onSuccess: (_data, c) => toast.success(c.is_hidden ? "Đã bỏ ẩn chiến dịch" : "Đã ẩn chiến dịch"),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.campaigns }),
+    meta: { errorMessage: "Không cập nhật được" },
+  });
 
-  async function toggleHidden(c: Campaign, e: React.MouseEvent) {
+  const deleteMutation = useMutation({
+    mutationFn: (c: Campaign) => apiSend(`/api/campaigns/${c.id}`, "DELETE"),
+    onSuccess: () => toast.success("Đã xoá chiến dịch"),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.campaigns }),
+    meta: { errorMessage: "Xoá thất bại" },
+  });
+  const deletingId = deleteMutation.isPending ? deleteMutation.variables?.id : null;
+
+  function toggleHidden(c: Campaign, e: React.MouseEvent) {
     e.stopPropagation();
-    const res = await fetch(`/api/campaigns/${c.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_hidden: !c.is_hidden }),
-    });
-    if (!res.ok) {
-      toast.error("Không cập nhật được");
-      return;
-    }
-    toast.success(c.is_hidden ? "Đã bỏ ẩn chiến dịch" : "Đã ẩn chiến dịch");
-    load();
+    hideMutation.mutate(c);
   }
 
   function copyCampaign(id: string, e: React.MouseEvent) {
@@ -103,19 +104,10 @@ export default function CampaignsPage() {
     router.push(`/campaigns/new?copyFrom=${id}`);
   }
 
-  async function deleteCampaign(c: Campaign, e: React.MouseEvent) {
+  function deleteCampaign(c: Campaign, e: React.MouseEvent) {
     e.stopPropagation();
     if (!confirm(`Xoá chiến dịch nháp "${c.name}"? Không thể hoàn tác.`)) return;
-    setDeletingId(c.id);
-    const res = await fetch(`/api/campaigns/${c.id}`, { method: "DELETE" });
-    const json = await res.json();
-    setDeletingId(null);
-    if (!res.ok) {
-      toast.error(json.error ?? "Xoá thất bại");
-      return;
-    }
-    toast.success("Đã xoá chiến dịch");
-    load();
+    deleteMutation.mutate(c);
   }
 
   const visibleCampaigns = useMemo(() => {
@@ -134,132 +126,151 @@ export default function CampaignsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(e) => setShowHidden(e.target.checked)}
-            />
-            {t("showHidden")}
-          </label>
-          <Button render={<Link href="/campaigns/new" />}>{t("createCampaign")}</Button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={
+          <>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                className="accent-primary"
+                checked={showHidden}
+                onChange={(e) => setShowHidden(e.target.checked)}
+              />
+              {t("showHidden")}
+            </label>
+            <Button render={<Link href="/campaigns/new" />}>
+              <Plus className="size-4" />
+              {t("createCampaign")}
+            </Button>
+          </>
+        }
+      />
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("colName")}</TableHead>
-            <TableHead>{t("colTemplate")}</TableHead>
-            <TableHead>{t("colStatus")}</TableHead>
-            <TableHead>{t("colCounts")}</TableHead>
-            <TableHead>{t("colCreatedAt")}</TableHead>
-            <TableHead className="text-right">{t("colActions")}</TableHead>
-          </TableRow>
-          <TableRow>
-            <TableHead>
-              <Input
-                className="h-7 text-xs"
-                placeholder={t("filterName")}
-                value={filterName}
-                onChange={(e) => setFilterName(e.target.value)}
-              />
-            </TableHead>
-            <TableHead>
-              <Input
-                className="h-7 text-xs"
-                placeholder={t("filterTemplate")}
-                value={filterTemplate}
-                onChange={(e) => setFilterTemplate(e.target.value)}
-              />
-            </TableHead>
-            <TableHead>
-              <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? ALL_STATUS)} items={statusItems}>
-                <SelectTrigger className="h-7 w-full text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_STATUS}>— {t("allStatus")} —</SelectItem>
-                  {Object.entries(STATUS_LABEL).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
-                      {v.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </TableHead>
-            <TableHead />
-            <TableHead />
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? (
+      <div className="rounded-xl border bg-card">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                {t("loading")}
-              </TableCell>
+              <TableHead>{t("colName")}</TableHead>
+              <TableHead>{t("colTemplate")}</TableHead>
+              <TableHead>{t("colStatus")}</TableHead>
+              <TableHead>{t("colCounts")}</TableHead>
+              <TableHead>{t("colCreatedAt")}</TableHead>
+              <TableHead className="text-right">{t("colActions")}</TableHead>
             </TableRow>
-          ) : visibleCampaigns.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                {t("noCampaigns")}
-              </TableCell>
+              <TableHead>
+                <Input
+                  className="h-7 text-xs"
+                  placeholder={t("filterName")}
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
+                />
+              </TableHead>
+              <TableHead>
+                <Input
+                  className="h-7 text-xs"
+                  placeholder={t("filterTemplate")}
+                  value={filterTemplate}
+                  onChange={(e) => setFilterTemplate(e.target.value)}
+                />
+              </TableHead>
+              <TableHead>
+                <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? ALL_STATUS)} items={statusItems}>
+                  <SelectTrigger className="h-7 w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_STATUS}>— {t("allStatus")} —</SelectItem>
+                    {Object.entries(STATUS_LABEL).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        {v.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </TableHead>
+              <TableHead />
+              <TableHead />
+              <TableHead />
             </TableRow>
-          ) : (
-            visibleCampaigns.map((c) => {
-              const statusInfo = STATUS_LABEL[c.status] ?? { label: c.status, variant: "outline" as const };
-              return (
-                <TableRow
-                  key={c.id}
-                  className="cursor-pointer"
-                  onClick={() => router.push(`/campaigns/${c.id}`)}
-                >
-                  <TableCell>
-                    <span className="hover:underline">{c.name}</span>
-                    {c.is_hidden && (
-                      <Badge variant="outline" className="ml-2">
-                        {t("hiddenBadge")}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{c.zalo_templates?.template_name ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {c.sent_count} / {c.failed_count} / {c.total_recipients}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(c.created_at).toLocaleString("vi-VN")}
-                  </TableCell>
-                  <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="sm" onClick={(e) => copyCampaign(c.id, e)}>
-                      {t("copy")}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={(e) => toggleHidden(c, e)}>
-                      {c.is_hidden ? t("unhide") : t("hide")}
-                    </Button>
-                    {c.status === "draft" && (
+          </TableHeader>
+          <TableBody>
+            {isPending ? (
+              <TableSkeletonRows cols={6} />
+            ) : visibleCampaigns.length === 0 ? (
+              <TableMessageRow cols={6}>{t("noCampaigns")}</TableMessageRow>
+            ) : (
+              visibleCampaigns.map((c) => {
+                const statusInfo = STATUS_LABEL[c.status] ?? { label: c.status, variant: "outline" as const };
+                return (
+                  <TableRow
+                    key={c.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/campaigns/${c.id}`)}
+                  >
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/campaigns/${c.id}`}
+                        className="hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {c.name}
+                      </Link>
+                      {c.is_hidden && (
+                        <Badge variant="outline" className="ml-2">
+                          {t("hiddenBadge")}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{c.zalo_templates?.template_name ?? "—"}</TableCell>
+                    <TableCell>
+                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      <span className="text-emerald-600">{c.sent_count}</span> /{" "}
+                      <span className="text-destructive">{c.failed_count}</span> / {c.total_recipients}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(c.created_at).toLocaleString("vi-VN")}
+                    </TableCell>
+                    <TableCell className="space-x-1 text-right whitespace-nowrap">
+                      <Button variant="ghost" size="sm" onClick={(e) => copyCampaign(c.id, e)} title={t("copy")}>
+                        <Copy className="size-3.5" />
+                        <span className="hidden xl:inline">{t("copy")}</span>
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={(e) => deleteCampaign(c, e)}
-                        disabled={deletingId === c.id}
+                        onClick={(e) => toggleHidden(c, e)}
+                        title={c.is_hidden ? t("unhide") : t("hide")}
                       >
-                        {deletingId === c.id ? t("deleting") : t("delete")}
+                        {c.is_hidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                        <span className="hidden xl:inline">{c.is_hidden ? t("unhide") : t("hide")}</span>
                       </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })
-          )}
-        </TableBody>
-      </Table>
+                      {c.status === "draft" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={(e) => deleteCampaign(c, e)}
+                          disabled={deletingId === c.id}
+                          title={t("delete")}
+                        >
+                          <Trash2 className="size-3.5" />
+                          <span className="hidden xl:inline">
+                            {deletingId === c.id ? t("deleting") : t("delete")}
+                          </span>
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

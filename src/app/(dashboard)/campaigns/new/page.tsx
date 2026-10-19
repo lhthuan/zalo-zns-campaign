@@ -2,6 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, Loader2, Plus } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,39 +31,34 @@ import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 import { formatVnd } from "@/lib/format";
 import { useTranslation } from "@/components/i18n-provider";
 import { ZnsPreviewFrame } from "@/components/zns-preview-frame";
+import { PageHeader } from "@/components/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch } from "@/lib/api-client";
+import {
+  customerCountQuery,
+  customerGroupsQuery,
+  importBatchesQuery,
+  queryKeys,
+  useEnabledTemplates,
+  type ZaloTemplate,
+} from "@/lib/queries";
+import { useTemplatePreview } from "@/hooks/use-template-preview";
 
 const NONE = "__none__";
 
-interface ZaloTemplateParam {
+interface CopySourceCampaign {
   name: string;
-  require: boolean;
-  type: string;
-  maxLength?: number;
-  minLength?: number;
-}
-
-interface ZaloTemplate {
-  id: string;
   template_id: string;
-  template_name: string;
-  status: string;
-  tag: string | null;
-  template_data_schema: ZaloTemplateParam[] | null;
-  preview_url: string | null;
-  price_sdt: number | null;
-  price_uid: number | null;
+  creation_mode: string;
+  customer_group_id: string | null;
+  customer_batch: string | null;
+  fixed_template_data: Record<string, string> | null;
 }
 
-interface ImportBatch {
-  import_batch: string;
-  customer_count: number;
-  last_imported_at: string;
-}
-
-interface CustomerGroup {
-  group_id: string;
-  name: string;
-  customer_count: number;
+interface CreateCampaignResult {
+  id: string;
+  rejectedRows?: number;
+  duplicateRows?: number;
 }
 
 interface ColumnSelectProps {
@@ -184,7 +181,7 @@ function TemplatePreview({
 export default function NewCampaignPage() {
   const { t } = useTranslation("campaignNew");
   return (
-    <Suspense fallback={<p className="text-muted-foreground">{t("loading")}</p>}>
+    <Suspense fallback={<Skeleton className="h-96 rounded-xl" aria-label={t("loading")} />}>
       <NewCampaignForm />
     </Suspense>
   );
@@ -192,20 +189,21 @@ export default function NewCampaignPage() {
 
 function NewCampaignForm() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation("campaignNew");
   const searchParams = useSearchParams();
   const copyFromId = searchParams.get("copyFrom");
 
-  const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
+  const { data: templates = [] } = useEnabledTemplates();
+  const { data: batches = [] } = useQuery(importBatchesQuery);
+  const { data: groups = [] } = useQuery(customerGroupsQuery);
+  const { data: allCustomerCount = 0 } = useQuery(customerCountQuery);
+
   const [templateId, setTemplateId] = useState<string>("");
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"broadcast" | "custom">("broadcast");
-  const [submitting, setSubmitting] = useState(false);
 
   // Broadcast mode
-  const [batches, setBatches] = useState<ImportBatch[]>([]);
-  const [groups, setGroups] = useState<CustomerGroup[]>([]);
-  const [allCustomerCount, setAllCustomerCount] = useState(0);
   const [broadcastSource, setBroadcastSource] = useState<"all" | "batch" | "group">("all");
   const [customerBatch, setCustomerBatch] = useState(ALL_CUSTOMERS_BATCH);
   const [customerGroupId, setCustomerGroupId] = useState("");
@@ -220,34 +218,16 @@ function NewCampaignForm() {
   const [uidColumn, setUidColumn] = useState(NONE);
   const [paramMapping, setParamMapping] = useState<Record<string, string>>({});
 
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/templates")
-      .then((res) => res.json())
-      .then((json) => setTemplates((json.data ?? []).filter((tpl: ZaloTemplate) => tpl.status === "ENABLE")))
-      .catch(() => toast.error("Không tải được danh sách template"));
-    fetch("/api/customers/import-batches")
-      .then((res) => res.json())
-      .then((json) => setBatches(json.data ?? []))
-      .catch(() => toast.error("Không tải được danh sách lô khách hàng"));
-    fetch("/api/customer-groups")
-      .then((res) => res.json())
-      .then((json) => setGroups(json.data ?? []))
-      .catch(() => toast.error("Không tải được danh sách nhóm khách hàng"));
-    fetch("/api/customers?page=1&pageSize=1")
-      .then((res) => res.json())
-      .then((json) => setAllCustomerCount(json.total ?? 0))
-      .catch(() => {});
-  }, []);
-
+  // Prefill from ?copyFrom= once; the campaign detail is usually already
+  // cached from the page the user came from.
   useEffect(() => {
     if (!copyFromId) return;
-    fetch(`/api/campaigns/${copyFromId}`)
-      .then((res) => res.json())
-      .then((json) => {
-        const c = json.data;
+    queryClient
+      .fetchQuery({
+        queryKey: queryKeys.campaign(copyFromId),
+        queryFn: () => apiFetch<{ data: CopySourceCampaign }>(`/api/campaigns/${copyFromId}`).then((j) => j.data),
+      })
+      .then((c) => {
         if (!c) return;
         setName(`${c.name} (bản sao)`);
         setTemplateId(c.template_id);
@@ -269,7 +249,7 @@ function NewCampaignForm() {
         }
       })
       .catch(() => toast.error("Không tải được chiến dịch để sao chép"));
-  }, [copyFromId]);
+  }, [copyFromId, queryClient]);
 
   const selectedTemplate = templates.find((tpl) => tpl.id === templateId);
   const params = selectedTemplate?.template_data_schema ?? [];
@@ -289,29 +269,27 @@ function NewCampaignForm() {
     groups.map((g) => [g.group_id, `${g.name} (${g.customer_count})`])
   );
 
-  useEffect(() => {
-    if (!selectedTemplate?.preview_url) {
-      // Clearing a stale preview when the template no longer has one is a
-      // direct reflection of props/state, not an external-system sync.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPreviewHtml(null);
-      return;
-    }
-    const timeout = setTimeout(() => {
-      setPreviewLoading(true);
-      fetch("/api/templates/preview-html", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateId: selectedTemplate.template_id, params: fixedParams }),
-      })
-        .then((res) => res.json())
-        .then((json) => setPreviewHtml(json.html ?? null))
-        .catch(() => setPreviewHtml(null))
-        .finally(() => setPreviewLoading(false));
-    }, 400);
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTemplate?.template_id, selectedTemplate?.preview_url, JSON.stringify(fixedParams)]);
+  const preview = useTemplatePreview(selectedTemplate?.template_id, !!selectedTemplate?.preview_url, fixedParams);
+
+  const createMutation = useMutation({
+    mutationFn: (formData: FormData) =>
+      apiFetch<CreateCampaignResult>("/api/campaigns", { method: "POST", body: formData }),
+    onSuccess: (json) => {
+      if (json.rejectedRows && json.rejectedRows > 0) {
+        toast.warning(`Đã loại ${json.rejectedRows} dòng lỗi (thiếu SĐT/UID hoặc SĐT không hợp lệ)`);
+      }
+      if (json.duplicateRows && json.duplicateRows > 0) {
+        toast.warning(`Đã gộp ${json.duplicateRows} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
+      }
+      toast.success("Đã tạo chiến dịch nháp");
+      queryClient.invalidateQueries({ queryKey: queryKeys.campaigns });
+      // Custom-mode imports upsert customers into the directory too.
+      queryClient.invalidateQueries({ queryKey: queryKeys.customers });
+      router.push(`/campaigns/${json.id}`);
+    },
+    meta: { errorMessage: "Tạo chiến dịch thất bại" },
+  });
+  const submitting = createMutation.isPending;
 
   function downloadDataTemplate() {
     if (!selectedTemplate) return;
@@ -335,11 +313,10 @@ function NewCampaignForm() {
     setHeaders(rows.length > 0 ? Object.keys(rows[0]) : []);
   }
 
-  async function handleSubmit() {
+  function handleSubmit() {
     if (!name.trim()) return toast.error("Nhập tên chiến dịch");
     if (!templateId) return toast.error("Chọn template");
 
-    setSubmitting(true);
     const formData = new FormData();
     formData.append("name", name.trim());
     formData.append("template_id", templateId);
@@ -348,12 +325,10 @@ function NewCampaignForm() {
     if (mode === "broadcast") {
       const missingRequired = params.filter((p) => p.require && !fixedParams[p.name]?.trim());
       if (missingRequired.length > 0) {
-        setSubmitting(false);
         return toast.error(`Chưa điền tham số bắt buộc: ${missingRequired.map((p) => p.name).join(", ")}`);
       }
       if (broadcastSource === "group") {
         if (!customerGroupId) {
-          setSubmitting(false);
           return toast.error("Chọn nhóm khách hàng");
         }
         formData.append("customer_group_id", customerGroupId);
@@ -363,16 +338,13 @@ function NewCampaignForm() {
       formData.append("fixed_template_data", JSON.stringify(fixedParams));
     } else {
       if (!file) {
-        setSubmitting(false);
         return toast.error("Chọn file danh sách người nhận");
       }
       if (phoneColumn === NONE && uidColumn === NONE) {
-        setSubmitting(false);
         return toast.error("Phải chọn cột Số điện thoại hoặc Zalo UID");
       }
       const missingRequired = params.filter((p) => p.require && !paramMapping[p.name]);
       if (missingRequired.length > 0) {
-        setSubmitting(false);
         return toast.error(`Chưa map tham số bắt buộc: ${missingRequired.map((p) => p.name).join(", ")}`);
       }
       formData.append("file", file);
@@ -387,28 +359,13 @@ function NewCampaignForm() {
       );
     }
 
-    const res = await fetch("/api/campaigns", { method: "POST", body: formData });
-    const json = await res.json();
-    setSubmitting(false);
-
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Tạo chiến dịch thất bại");
-      return;
-    }
-    if (json.rejectedRows > 0) {
-      toast.warning(`Đã loại ${json.rejectedRows} dòng lỗi (thiếu SĐT/UID hoặc SĐT không hợp lệ)`);
-    }
-    if (json.duplicateRows > 0) {
-      toast.warning(`Đã gộp ${json.duplicateRows} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
-    }
-    toast.success("Đã tạo chiến dịch nháp");
-    router.push(`/campaigns/${json.id}`);
+    createMutation.mutate(formData);
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="max-w-4xl space-y-4">
-      <h1 className="text-xl font-semibold">{t("title")}</h1>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+      <div className="min-w-0 space-y-4">
+      <PageHeader title={t("title")} />
 
       <Card>
         <CardHeader>
@@ -545,6 +502,7 @@ function NewCampaignForm() {
               <TabsContent value="custom" className="space-y-4 pt-4">
                 <p className="text-sm text-muted-foreground">{t("customHint")}</p>
                 <Button variant="outline" onClick={downloadDataTemplate}>
+                  <Download className="size-4" />
                   {t("downloadSample")}
                 </Button>
                 <div className="space-y-1">
@@ -606,7 +564,8 @@ function NewCampaignForm() {
               </TabsContent>
             </Tabs>
 
-            <Button className="mt-4" onClick={handleSubmit} disabled={submitting}>
+            <Button size="lg" className="mt-4" onClick={handleSubmit} disabled={submitting}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
               {submitting ? t("creating") : t("createDraft")}
             </Button>
           </CardContent>
@@ -626,13 +585,16 @@ function NewCampaignForm() {
               <p className="text-sm text-muted-foreground">{t("livePreviewNoUrl")}</p>
             ) : (
               <div className="relative min-h-[200px] overflow-hidden rounded-lg border">
-                {previewLoading && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs text-muted-foreground">
+                {preview.isFetching && (
+                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+                    <Loader2 className="size-3 animate-spin" />
                     {t("livePreviewLoading")}
                   </div>
                 )}
-                {previewHtml && (
-                  <ZnsPreviewFrame html={previewHtml} title={t("livePreviewTitle")} />
+                {preview.data ? (
+                  <ZnsPreviewFrame html={preview.data} title={t("livePreviewTitle")} />
+                ) : (
+                  preview.isPending && <Skeleton className="h-[400px] w-full rounded-none" />
                 )}
               </div>
             )}

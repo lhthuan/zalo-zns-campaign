@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { use } from "react";
 import Link from "next/link";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CampaignRecipientsGrid } from "@/components/campaign-recipients-grid";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { apiFetch } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
 
 interface ReportSummary {
   sentUid: number;
@@ -15,63 +20,59 @@ interface ReportSummary {
   pending: number;
 }
 
+function SummaryCard({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">{label}</p>
+        <div className="mt-1 text-2xl font-semibold tabular-nums">{children}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function CampaignReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { t } = useTranslation("campaignReport");
-  const [summary, setSummary] = useState<ReportSummary | null>(null);
 
-  useEffect(() => {
-    // Only the summary counts are fetched here now — the detail table below
-    // is a self-contained, paginated grid component.
-    fetch(`/api/campaigns/${id}/report?page=1`)
-      .then((res) => res.json())
-      .then((json) => setSummary(json.summary))
-      .catch(() => toast.error(t("loadFailed")));
-  }, [id, t]);
+  // Only the summary counts are fetched here — the detail table below is a
+  // self-contained, paginated grid component.
+  const { data: summary } = useQuery({
+    queryKey: [...queryKeys.campaign(id), "report-summary"],
+    queryFn: () => apiFetch<{ summary: ReportSummary }>(`/api/campaigns/${id}/report?page=1`).then((j) => j.summary),
+    meta: { errorMessage: t("loadFailed") },
+  });
 
   const total = summary ? summary.sentUid + summary.sentPhone + summary.failed + summary.pending : 0;
 
   return (
     <div className="space-y-4">
       <Button variant="ghost" size="sm" render={<Link href={`/campaigns/${id}`} />}>
-        ← {t("backToCampaign")}
+        <ArrowLeft className="size-4" />
+        {t("backToCampaign")}
       </Button>
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
-      </div>
+      <PageHeader title={t("title")} />
 
-      {summary && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">{t("total")}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">{total}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">{t("successUidPhone")}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold text-emerald-600">
-              {summary.sentUid + summary.sentPhone}
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({summary.sentUid} UID · {summary.sentPhone} SĐT)
-              </span>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">{t("failed")}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold text-destructive">{summary.failed}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">{t("remaining")}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">{summary.pending}</CardContent>
-          </Card>
+      {summary ? (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <SummaryCard label={t("total")}>{total}</SummaryCard>
+          <SummaryCard label={t("successUidPhone")}>
+            <span className="text-emerald-600">{summary.sentUid + summary.sentPhone}</span>
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              ({summary.sentUid} UID · {summary.sentPhone} SĐT)
+            </span>
+          </SummaryCard>
+          <SummaryCard label={t("failed")}>
+            <span className="text-destructive">{summary.failed}</span>
+          </SummaryCard>
+          <SummaryCard label={t("remaining")}>{summary.pending}</SummaryCard>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
         </div>
       )}
 

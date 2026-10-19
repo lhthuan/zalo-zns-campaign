@@ -40,6 +40,9 @@ export const translations = {
       settings: "Cài đặt",
       logout: "Đăng xuất",
       language: "Ngôn ngữ",
+      collapseSidebar: "Thu gọn menu",
+      expandSidebar: "Mở rộng menu",
+      openMenu: "Mở menu",
     },
     login: {
       title: "Đăng nhập — Zalo ZNS Campaign",
@@ -524,6 +527,9 @@ export const translations = {
       settings: "설정",
       logout: "로그아웃",
       language: "언어",
+      collapseSidebar: "메뉴 접기",
+      expandSidebar: "메뉴 펼치기",
+      openMenu: "메뉴 열기",
     },
     login: {
       title: "로그인 — Zalo ZNS Campaign",

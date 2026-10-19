@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Download, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,9 @@ import {
 } from "@/components/ui/table";
 import { mapAndValidateCustomerRows, type ValidatedCustomerRow } from "@/lib/spreadsheet/import";
 import { useTranslation } from "@/components/i18n-provider";
+import { PageHeader } from "@/components/page-header";
+import { apiSend } from "@/lib/api-client";
+import { queryKeys } from "@/lib/queries";
 
 const NONE = "__none__";
 
@@ -75,6 +80,7 @@ function downloadSampleTemplate() {
 
 export default function CustomersImportPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation("customersImport");
   const [batchName, setBatchName] = useState("");
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
@@ -87,7 +93,23 @@ export default function CustomersImportPage() {
     group: NONE,
   });
   const [preview, setPreview] = useState<ValidatedCustomerRow[] | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+
+  const importMutation = useMutation({
+    mutationFn: (body: { batch_name: string; rows: ValidatedCustomerRow["data"][] }) =>
+      apiSend<{ imported: number; totalRows: number; duplicate: number }>("/api/customers/import", "POST", body),
+    onSuccess: (json, body) => {
+      toast.success(`Đã import ${json.imported}/${json.totalRows} dòng vào lô "${body.batch_name}"`);
+      if (json.duplicate > 0) {
+        toast.warning(`Đã gộp ${json.duplicate} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.customers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.importBatches });
+      queryClient.invalidateQueries({ queryKey: queryKeys.customerGroups });
+      router.push("/customers");
+    },
+    meta: { errorMessage: "Import thất bại" },
+  });
+  const submitting = importMutation.isPending;
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -122,38 +144,21 @@ export default function CustomersImportPage() {
     setPreview(validated);
   }
 
-  async function handleConfirmImport() {
+  function handleConfirmImport() {
     if (!preview) return;
     const validRows = preview.filter((r) => r.valid).map((r) => r.data);
     if (validRows.length === 0) return toast.error("Không có dòng hợp lệ nào để import");
     if (!batchName.trim()) return toast.error("Đặt tên cho lô import này");
 
-    setSubmitting(true);
-    const res = await fetch("/api/customers/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batch_name: batchName.trim(), rows: validRows }),
-    });
-    const json = await res.json();
-    setSubmitting(false);
-
-    if (!res.ok) {
-      toast.error(json.error ? JSON.stringify(json.error) : "Import thất bại");
-      return;
-    }
-    toast.success(`Đã import ${json.imported}/${json.totalRows} dòng vào lô "${batchName.trim()}"`);
-    if (json.duplicate > 0) {
-      toast.warning(`Đã gộp ${json.duplicate} dòng trùng SĐT/Zalo UID (chỉ giữ dòng cuối cùng)`);
-    }
-    router.push("/customers");
+    importMutation.mutate({ batch_name: batchName.trim(), rows: validRows });
   }
 
   const validCount = preview?.filter((r) => r.valid).length ?? 0;
   const invalidRows = preview?.filter((r) => !r.valid) ?? [];
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">{t("title")}</h1>
+    <div className="max-w-3xl space-y-4">
+      <PageHeader title={t("title")} />
 
       <Card>
         <CardHeader>
@@ -161,6 +166,7 @@ export default function CustomersImportPage() {
         </CardHeader>
         <CardContent>
           <Button variant="outline" onClick={downloadSampleTemplate}>
+            <Download className="size-4" />
             {t("downloadSample")}
           </Button>
         </CardContent>
@@ -297,6 +303,7 @@ export default function CustomersImportPage() {
             </div>
 
             <Button onClick={handleConfirmImport} disabled={submitting || validCount === 0}>
+              {submitting && <Loader2 className="size-4 animate-spin" />}
               {submitting ? t("importing") : `${t("confirmImport")} ${validCount} ${t("validRows")}`}
             </Button>
           </CardContent>
