@@ -16,6 +16,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { formatVnd } from "@/lib/format";
 import { useTranslation } from "@/components/i18n-provider";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+
+type SortKey = "id" | "name";
 
 interface ZaloTemplateParam {
   name: string;
@@ -54,6 +57,7 @@ export default function TemplatesPage() {
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<ZaloTemplate | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "id", dir: "desc" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,13 +77,35 @@ export default function TemplatesPage() {
     load();
   }, [load]);
 
-  const filtered = templates.filter((tpl) => {
-    if (!search.trim()) return true;
-    const q = search.trim().toLowerCase();
-    return (
-      tpl.template_name.toLowerCase().includes(q) || tpl.template_id.toLowerCase().includes(q)
+  const filtered = templates
+    .filter((tpl) => {
+      if (!search.trim()) return true;
+      const q = search.trim().toLowerCase();
+      return (
+        tpl.template_name.toLowerCase().includes(q) || tpl.template_id.toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      const cmp =
+        sort.key === "name"
+          ? a.template_name.localeCompare(b.template_name, "vi", { numeric: true })
+          : Number(a.template_id) - Number(b.template_id);
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : // Names read naturally A→Z; IDs default to newest first.
+          { key, dir: key === "name" ? "asc" : "desc" }
     );
-  });
+  }
+
+  function sortIcon(key: SortKey) {
+    if (sort.key !== key) return <ArrowUpDown className="size-3.5 opacity-50" />;
+    return sort.dir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />;
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -119,8 +145,18 @@ export default function TemplatesPage() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t("colName")}</TableHead>
-            <TableHead>{t("colId")}</TableHead>
+            <TableHead>
+              <button type="button" onClick={() => toggleSort("name")} className="inline-flex items-center gap-1 hover:text-foreground">
+                {t("colName")}
+                {sortIcon("name")}
+              </button>
+            </TableHead>
+            <TableHead>
+              <button type="button" onClick={() => toggleSort("id")} className="inline-flex items-center gap-1 hover:text-foreground">
+                {t("colId")}
+                {sortIcon("id")}
+              </button>
+            </TableHead>
             <TableHead>{t("colTag")}</TableHead>
             <TableHead>{t("colStatus")}</TableHead>
             <TableHead>{t("colLastSynced")}</TableHead>

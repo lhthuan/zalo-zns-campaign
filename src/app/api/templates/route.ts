@@ -6,11 +6,11 @@ export async function GET() {
   try {
     await requireUser();
     const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from("zalo_templates")
-      .select("*")
-      .order("template_name", { ascending: true });
+    const { data, error } = await supabase.from("zalo_templates").select("*");
     if (error) throw error;
+    // Newest first. template_id is a text column of numeric IDs, so compare
+    // numerically — string order would put "99999" above "600501".
+    data.sort((a, b) => Number(b.template_id) - Number(a.template_id));
     return NextResponse.json({ data });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
