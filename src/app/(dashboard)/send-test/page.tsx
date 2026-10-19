@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { isValidVietnamesePhone } from "@/lib/phone";
 import { useTranslation } from "@/components/i18n-provider";
+import { ZnsPreviewFrame } from "@/components/zns-preview-frame";
 
 interface ZaloTemplateParam {
   name: string;
@@ -373,19 +374,14 @@ export default function SendTestPage() {
                 </div>
 
                 {selectedTemplate.preview_url ? (
-                  <div className="relative min-h-[500px] overflow-hidden rounded-lg border">
+                  <div className="relative min-h-[200px] overflow-hidden rounded-lg border">
                     {previewLoading && (
                       <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs text-muted-foreground">
                         {t("previewLoading")}
                       </div>
                     )}
                     {previewHtml && (
-                      <iframe
-                        srcDoc={previewHtml}
-                        title={t("previewTitle")}
-                        sandbox="allow-scripts allow-same-origin"
-                        className="h-[500px] w-full"
-                      />
+                      <ZnsPreviewFrame html={previewHtml} title={t("previewTitle")} />
                     )}
                   </div>
                 ) : params.length === 0 ? (

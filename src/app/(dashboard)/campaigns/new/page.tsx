@@ -28,6 +28,7 @@ import {
 import { ALL_CUSTOMERS_BATCH } from "@/lib/customerBatch";
 import { formatVnd } from "@/lib/format";
 import { useTranslation } from "@/components/i18n-provider";
+import { ZnsPreviewFrame } from "@/components/zns-preview-frame";
 
 const NONE = "__none__";
 
@@ -624,19 +625,14 @@ function NewCampaignForm() {
             ) : !selectedTemplate.preview_url ? (
               <p className="text-sm text-muted-foreground">{t("livePreviewNoUrl")}</p>
             ) : (
-              <div className="relative min-h-[500px] overflow-hidden rounded-lg border">
+              <div className="relative min-h-[200px] overflow-hidden rounded-lg border">
                 {previewLoading && (
                   <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs text-muted-foreground">
                     {t("livePreviewLoading")}
                   </div>
                 )}
                 {previewHtml && (
-                  <iframe
-                    srcDoc={previewHtml}
-                    title={t("livePreviewTitle")}
-                    sandbox="allow-scripts allow-same-origin"
-                    className="h-[500px] w-full"
-                  />
+                  <ZnsPreviewFrame html={previewHtml} title={t("livePreviewTitle")} />
                 )}
               </div>
             )}
