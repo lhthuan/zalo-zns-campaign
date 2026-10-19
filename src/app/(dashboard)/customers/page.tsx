@@ -423,11 +423,11 @@ export default function CustomersPage() {
         title={t("title")}
         actions={
           <>
-            <Button variant="outline" render={<a href={exportUrl("xlsx")} />}>
+            <Button variant="outline" nativeButton={false} render={<a href={exportUrl("xlsx")} />}>
               <Download className="size-4" />
               {t("exportExcel")}
             </Button>
-            <Button variant="outline" render={<a href={exportUrl("csv")} />}>
+            <Button variant="outline" nativeButton={false} render={<a href={exportUrl("csv")} />}>
               <Download className="size-4" />
               {t("exportCsv")}
             </Button>
@@ -435,7 +435,7 @@ export default function CustomersPage() {
               <FolderTree className="size-4" />
               {t("manageGroups")}
             </Button>
-            <Button variant="outline" render={<Link href="/customers/import" />}>
+            <Button variant="outline" nativeButton={false} render={<Link href="/customers/import" />}>
               <Upload className="size-4" />
               {t("importFile")}
             </Button>

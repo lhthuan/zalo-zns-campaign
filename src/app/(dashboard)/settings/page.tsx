@@ -282,7 +282,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">{t("oauthHint")}</p>
-          <Button variant="outline" render={<a href="/api/zalo/oauth/start" />}>
+          <Button variant="outline" nativeButton={false} render={<a href="/api/zalo/oauth/start" />}>
             {t("connectZalo")}
           </Button>
         </CardContent>

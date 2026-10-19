@@ -138,11 +138,11 @@ export function CampaignRecipientsGrid({ campaignId, live = false }: { campaignI
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" render={<a href={exportUrl("xlsx")} />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<a href={exportUrl("xlsx")} />}>
             <Download className="size-3.5" />
             {t("exportExcel")}
           </Button>
-          <Button variant="outline" size="sm" render={<a href={exportUrl("csv")} />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<a href={exportUrl("csv")} />}>
             <Download className="size-3.5" />
             {t("exportCsv")}
           </Button>

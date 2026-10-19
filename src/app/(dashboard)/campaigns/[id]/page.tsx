@@ -169,7 +169,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" render={<Link href="/campaigns" />}>
+      <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/campaigns" />}>
         <ArrowLeft className="size-4" />
         {t("backToList")}
       </Button>
@@ -219,7 +219,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           <Badge>
             {tStatus(campaign.status as "draft" | "sending" | "completed" | "completed_with_errors" | "failed")}
           </Badge>
-          <Button variant="outline" size="sm" render={<Link href={`/campaigns/new?copyFrom=${id}`} />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/campaigns/new?copyFrom=${id}`} />}>
             <Copy className="size-3.5" />
             {t("copy")}
           </Button>
@@ -280,7 +280,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               </Button>
             )}
             {["completed", "completed_with_errors", "failed"].includes(campaign.status) && (
-              <Button variant="outline" render={<Link href={`/campaigns/${id}/report`} />}>
+              <Button variant="outline" nativeButton={false} render={<Link href={`/campaigns/${id}/report`} />}>
                 <FileBarChart className="size-4" />
                 {t("viewReport")}
               </Button>

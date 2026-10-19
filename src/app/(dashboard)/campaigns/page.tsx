@@ -139,7 +139,7 @@ export default function CampaignsPage() {
               />
               {t("showHidden")}
             </label>
-            <Button render={<Link href="/campaigns/new" />}>
+            <Button nativeButton={false} render={<Link href="/campaigns/new" />}>
               <Plus className="size-4" />
               {t("createCampaign")}
             </Button>

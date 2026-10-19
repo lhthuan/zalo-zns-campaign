@@ -47,7 +47,7 @@ export default function CampaignReportPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" render={<Link href={`/campaigns/${id}`} />}>
+      <Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/campaigns/${id}`} />}>
         <ArrowLeft className="size-4" />
         {t("backToCampaign")}
       </Button>

@@ -37,6 +37,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .select(selectClause, { count: "exact" })
       .eq("campaign_id", id)
       .order(sortColumn, { ascending: sortDir })
+      // Unique tiebreaker so offset pages don't overlap/skip rows that share
+      // the sort value (e.g. same status or created_at).
+      .order("id", { ascending: true })
       .range((page - 1) * pageSize, page * pageSize - 1);
 
     if (filterPhone) query = query.ilike("phone", `%${filterPhone}%`);

@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
       .from("api_send_log")
       .select("*, api_keys(name)", { count: "exact" })
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range((page - 1) * pageSize, page * pageSize - 1);
     if (phone) query = query.ilike("phone", `%${phone}%`);
 

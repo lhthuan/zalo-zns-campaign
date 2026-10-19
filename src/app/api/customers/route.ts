@@ -44,8 +44,12 @@ export async function GET(request: NextRequest) {
           .eq("customer_group_members.group_id", groupId)
       : supabase.from("customers").select("*", { count: "exact" });
 
+    // id breaks ties: rows imported together share created_at, and without a
+    // unique tiebreaker Postgres may order them differently per query, so
+    // offset pages overlap (duplicates) and skip rows on "load more".
     query = query
       .order(sortColumn, { ascending: sortDir })
+      .order("id", { ascending: true })
       .range((page - 1) * pageSize, page * pageSize - 1);
 
     if (search) {
