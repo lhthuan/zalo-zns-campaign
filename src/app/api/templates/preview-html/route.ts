@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { getTemplateDetail } from "@/lib/zalo/api";
 
 // Zalo's preview page is cross-origin, so we can't script real values into it
 // via an iframe (no DOM access, no postMessage support on their end). Instead
@@ -19,6 +20,15 @@ function escapeHtml(value: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function fetchPreviewPage(url: string): Promise<string | null> {
+  const res = await fetch(url, { cache: "no-store" });
+  return res.ok ? res.text() : null;
+}
+
+function isEmptyPreviewShell(html: string): boolean {
+  return /<textarea[^>]*id="preview-content-source"[^>]*>\s*<\/textarea>/i.test(html);
 }
 
 export async function POST(request: NextRequest) {
@@ -42,11 +52,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Template chưa có link xem trước" }, { status: 404 });
     }
 
-    const previewRes = await fetch(template.preview_url);
-    if (!previewRes.ok) {
+    let previewUrl = template.preview_url;
+    let html = await fetchPreviewPage(previewUrl);
+
+    // Since Zalo's 2026-10-15 preview rewrite, the page is a shell whose
+    // content lives in a server-filled <textarea>, and Zalo intermittently
+    // serves it empty (Zalo's own script then shows "Không có nội dung xem
+    // trước. URL "srcdoc"..."). Nudge it via template/info (which also tells
+    // us if the preview link changed) and retry a few times.
+    for (let attempt = 0; attempt < 3 && html !== null && isEmptyPreviewShell(html); attempt++) {
+      if (attempt === 0) {
+        try {
+          const detail = await getTemplateDetail(templateId);
+          if (detail.previewUrl && detail.previewUrl !== previewUrl) {
+            previewUrl = detail.previewUrl;
+            await supabase
+              .from("zalo_templates")
+              .update({ preview_url: previewUrl })
+              .eq("template_id", templateId);
+          }
+        } catch {
+          // Best effort — still retry the fetch below.
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      html = await fetchPreviewPage(previewUrl);
+    }
+    if (html === null) {
       return NextResponse.json({ error: "Không tải được nội dung xem trước từ Zalo" }, { status: 502 });
     }
-    let html = await previewRes.text();
 
     for (const [key, rawValue] of Object.entries(params)) {
       const safeValue = escapeHtml(rawValue?.trim() ? rawValue : `<${key}>`);
@@ -60,7 +94,7 @@ export async function POST(request: NextRequest) {
 
     // Relative asset URLs (css/js/images) in the fetched page must resolve
     // against Zalo's origin, not ours, once rendered via srcDoc.
-    const baseTag = `<base href="${template.preview_url}">`;
+    const baseTag = `<base href="${previewUrl}">`;
     html = /<head[^>]*>/i.test(html)
       ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`)
       : `<head>${baseTag}</head>${html}`;
